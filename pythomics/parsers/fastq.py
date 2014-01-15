@@ -1,4 +1,4 @@
-import templates
+import pythomics.templates as templates
 
 class FastqIterator(templates.GenericIterator):
     def __init__(self, filename):

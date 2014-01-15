@@ -1,5 +1,5 @@
 import os, re
-import templates, config
+import pythomics.templates as templates, config
 
 def _reverse_complement(seq):
     return ''.join([config.BASE_PAIR_COMPLEMENTS[i] for i in reversed(seq)])

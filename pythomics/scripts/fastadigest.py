@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 
 import argparse, sys, os
-import proteomics.config, proteomics.digest, parsers.fasta
+import pythomics.proteomics.config as config
+import pythomics.proteomics.digest as digest
+import pythomics.parsers.fasta as fasta
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--enzyme', help="The enzyme to cleave with.", choices=proteomics.config.ENZYMES.keys(), type=str, default='trypsin')
+parser.add_argument('--enzyme', help="The enzyme to cleave with.", choices=config.ENZYMES.keys(), type=str, default='trypsin')
 parser.add_argument('-f', '--file', help="The fasta file to cleave.", type=str, required=True)
 parser.add_argument('-o', '--out', help="The file to write digested products to.", type=str, required=True)
 parser.add_argument('-t', '--type', help="The type of fasta file (default protein).", choices=['prot','nt'], type=str, default='prot')
@@ -33,20 +35,20 @@ def main():
     if digest_type == 'nt' and not digest_frame:
         print "Nucleotide digestions must specify the frame."
         return 1
-    fasta = parsers.fasta.FastaIterator(file_name)
-    enzyme = proteomics.digest.Enzyme( enzyme=enzyme_choice )
+    fasta = fasta.FastaIterator(file_name)
+    enzyme = digest.Enzyme( enzyme=enzyme_choice )
     with open(args.out, 'wb') as o:
         if digest_type == 'nt':
             for header, sequence in fasta:
                 for i in xrange(digest_frame):
                     strand='+'
-                    for protein_index,protein_sequence in enumerate(parsers.fasta._translate(sequence[i:]).split('*')):
+                    for protein_index,protein_sequence in enumerate(fasta._translate(sequence[i:]).split('*')):
                         peptides = enzyme.cleave(protein_sequence, min=digest_min, max=digest_max)
                         for peptide_index,peptide in enumerate(peptides):
                             o.write('>%s F:%s%d Orf:%d Pep:%d \n%s\n' % (header,strand,i+1,protein_index+1,peptide_index+1,peptide))
                     if digest_negative:
                         strand = '-'
-                        for protein_index,protein_sequence in enumerate(parsers.fasta._translate(parsers.fasta._reverse_complement(sequence)[i:]).split('*')):
+                        for protein_index,protein_sequence in enumerate(fasta._translate(fasta._reverse_complement(sequence)[i:]).split('*')):
                             peptides = enzyme.cleave(protein_sequence, min=digest_min, max=digest_max)
                             for peptide_index,peptide in enumerate(peptides):
                                 o.write('>%s F:%s%d Orf:%d Pep:%d \n%s\n' % (header,strand,i+1,protein_index+1,peptide_index+1,peptide))
