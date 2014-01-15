@@ -1,0 +1,1 @@
+BASE_PAIR_COMPLEMENTS = {'a': 't', 't': 'a', 'c': 'g', 'g': 'c', 'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
