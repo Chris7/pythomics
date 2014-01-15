@@ -8,7 +8,7 @@ def _complement(seq):
     return ''.join([config.BASE_PAIR_COMPLEMENTS[i] for i in seq])
 
 def _translate(seq):
-    return ''.join([config.CODON_TABLE.get(seq[i:i+3],'') for i in xrange(0,len(seq),3)])
+    return ''.join([config.CODON_TABLE.get(seq[i:i+3],'') for i in xrange(0,len(seq.upper()),3)])
 
 class FastaIterator(templates.GenericIterator):
     def __init__(self, filename, delimiter='>', **kwrds):
