@@ -1,5 +1,5 @@
 import os, unittest, hashlib
-import parsers.fasta as parser
+import pythomics.parsers.fasta as parser
  
 class Test_Fasta_Iterator(unittest.TestCase):
      
@@ -14,7 +14,7 @@ class Test_Fasta_Iterator(unittest.TestCase):
         for header, sequence in f:
             out += ">%s\n%s\n"%(header,sequence)
         digest = hashlib.sha224(out).hexdigest()
-        self.assertEqual( '4208fd8f0e8e8fa4f27e002431d624421da220872d75172db76257a1', digest, "Fasta Iterator Failure")
+        self.assertEqual( 'a4b6987095e97824cbcb36674f9757c4ccfad161eeb9fd8a993e851a', digest, "Fasta Iterator Failure")
         
     def test_fasta_index_build(self):
         f = parser.FastaIterator( self.handle )
@@ -34,6 +34,7 @@ class Test_Fasta_Iterator(unittest.TestCase):
         out = f.get_sequence('c2', 59, 80)
         digest = hashlib.sha224(out).hexdigest()
         self.assertEqual( 'b93fb5c1cf028b56b59bd20446bfaaa0a390f6d9a971c3c6cce2e202', digest, "Fasta get_sequence #3 Failure")
+        self.assertRaises( ValueError, f.get_sequence, 'c2', 59, 80000)
         
         
 suite = unittest.TestLoader().loadTestsFromTestCase(Test_Fasta_Iterator)

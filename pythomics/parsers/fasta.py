@@ -26,14 +26,14 @@ class FastaIterator(templates.GenericIterator):
         #look for an index
         self.fasta_index = kwrds.get('index', None)
         if not self.fasta_index:
-            if os.path.exists(os.path.join(self.fasta_file.name, '.fai')):
-                self.fasta_index = os.path.join(self.fasta_file.name, '.fai')
-            elif os.path.exists(os.path.join(self.fasta_file.name, '.faidx')):
-                self.fasta_index = os.path.join(self.fasta_file.name, '.faidx')
+            if os.path.exists('%s.%s' % (self.fasta_file.name, 'fai')):
+                self.fasta_index = '%s.%s' % (self.fasta_file.name, 'fai')
+            elif os.path.exists( '%s.%s' % (self.fasta_file.name, 'faidx')):
+                self.fasta_index = '%s.%s' % (self.fasta_file.name, 'faidx')
             else:
                 self.fasta_index = None
             if self.fasta_index:
-                self.open_fasta_index(self.fasta_index)
+                self.open_fasta_index()
         self.sequence_index = {}
         self.row = None
         
@@ -97,9 +97,13 @@ class FastaIterator(templates.GenericIterator):
             try:
                 divisor = int(self.sequence_index[chrom][2])
             except KeyError:
-                return None
+                raise KeyError("%s cannot be found within the fasta index file." % chrom)
         start+=indexing[0]
         end+=indexing[1]
+        #is it a valid position?
+        if ( start < 0 or end > int(self.sequence_index[chrom][0] )):
+            raise ValueError("The range %d-%d is invalid. Valid range for this feature is 1-%d." % (start-indexing[0], end-indexing[1], 
+                                                                                                     int(self.sequence_index[chrom][0])))
         #go to start of chromosome
         seekpos = int(self.sequence_index[chrom][1])
         #find how many newlines we have
