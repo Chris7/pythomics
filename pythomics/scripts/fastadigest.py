@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import argparse, sys, os
+import argparse, sys
 import pythomics.proteomics.config as config
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
