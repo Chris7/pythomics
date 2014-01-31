@@ -1,6 +1,6 @@
 import os, unittest, hashlib
-import parsers.fasta as parser
-import proteomics.digest as digest
+import pythomics.parsers.fasta as parser
+import pythomics.proteomics.digest as digest
  
 class Test_Protein_Digestion(unittest.TestCase):
      
