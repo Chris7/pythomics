@@ -1,6 +1,6 @@
 #We use X!Tandem notation for enzymatic digestion:
 #http://thegpm.org/TANDEM/api/pcs.html
-ENZYMES = {'trypsin': '[KR]|{P}', 'lysc': '[K]|'}
+ENZYMES = {'trypsin': '[KR]|{P}', 'lysc': '[K]|', 'None': '|'}
 
 #masses from: http://www.weddslist.com/ms/tables.html#tm4
 #stored as mass, charge
