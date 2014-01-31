@@ -2,6 +2,12 @@ import re, collections, itertools
 import config
 
 class Enzyme(object):
+    """
+    The Enzyme class holds a proteolytic enzyme for protein digestion.
+    Enzymes can be specified by name, or by pattern. The pattern follows
+    the specification of X!Tandem, which can be found here:
+    http://thegpm.org/TANDEM/api/pcs.html
+    """
     def __init__(self, enzyme='trypsin', pattern=None):
         if pattern:
             rules = pattern.split(',')
