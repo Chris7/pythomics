@@ -21,10 +21,13 @@ class Enzyme(object):
                 regex = re.compile('(%s)'%rule)#it's already in regex form
             self.patterns.append(regex) 
         
-    def cleave(self, sequence, min=7, max=30):
+    def cleave(self, sequence, min=7, max=30, unique=False):
         peptides = []
         for regex in self.patterns:
             digests = [i for i in regex.split(sequence)]
             digests = [''.join(i) for i in itertools.izip_longest(digests[0::2],digests[1::2],fillvalue='')]
-            peptides += list(collections.OrderedDict.fromkeys([i for i in digests if len(i) >= min and len(i) <= max]))
+            if unique:
+                peptides += list(collections.OrderedDict.fromkeys([i for i in digests if len(i) >= min and len(i) <= max]))
+            else:
+                peptides = [i for i in digests if len(i) >= min and len(i) <= max]
         return peptides
