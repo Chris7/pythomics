@@ -1,8 +1,11 @@
 class VCFFile(object):
-    """
-    This is designed to be somewhat consistent with the C++ vcftools
-    """
     def __init__(self, filename):
+        """VCF File container
+        
+        This class is designed to be somewhat consistent with the C++ vcftools.
+        It contains references to the entries contained within the file.
+        
+        """
         self.filename = filename
         self.meta = VCFMeta()
         self.n_individuals = 0
@@ -28,14 +31,29 @@ class VCFFile(object):
     def add_contig(self, entry):
         return True
     
-    def add_entry(self, entry):
+    def add_alt(self, entry):
+        return self.meta.add_alt(entry)
+    
+    def parse_entry(self, row):
         var_call = VCFEntry(self.n_individuals)
-        var_call.parse_entry( entry )
-        self.entries[(var_call.chrom, var_call.pos)] = var_call
-        return self.entries[(var_call.chrom, var_call.pos)]
+        var_call.parse_entry(row)
+        return var_call
+    
+    def add_entry(self, row):
+        var_call = VCFEntry(self.n_individuals) 
+        var_call.parse_entry( row )
+        self.entries[(var_call.chrom, var_call.pos)] = var_call  
+        return var_call
     
 class VCFMeta(object):
+
     def __init__(self):
+        """VCF Metainfo Container
+        
+        This contains information in the metainfo of a VCF File
+        such as the format fields, ids, and filters.
+    
+        """
         self.info = {}
         self.filter = {}
         self.format = {}
@@ -103,6 +121,23 @@ class VCFMeta(object):
                 break
         return True
     
+    def add_alt(self, entry):
+        entry = entry[7:-1]
+        info = entry.split(',')
+        if len(info) < 2:
+            return False
+        for v in info:
+            key, value = v.split('=')
+            if key == 'ID':
+                self.format[value] = {}
+                id_ = value 
+            elif key == 'Description':
+                self.format[id_]['description'] = value
+                if len(info) > 4:
+                    self.format[id_]['description'] += '; '.join(info[4:])
+                break
+        return True
+    
 class VCFEntry(object):
     def __init__(self, individuals):
         self.passed = [False for __ in xrange(individuals)]
@@ -118,18 +153,46 @@ class VCFEntry(object):
         self.DP = -1
         self.FT = -1
         self.ploidy = 2
+        
+    def __str__(self):
+        """
+        Returns the VCF entry as it appears in the vcf file, minus sample info currently
+        """
+        info = self.info.keys()
+        values = [self.info[i] for i in info]
+#         if self.GT != -1:
+#         if self.GQ != -1:
+#         if self.DP != -1:
+#         if self.FT != -1:
+#         sample_info = self.genotype[n]
+        return '\t'.join([self.chrom, self.pos, self.id, '.' if not self.ref else self.ref,
+                          '.' if not self.alt else ','.join(self.alt), self.qual,
+                          'PASS' if self.passed else ';'.join(self.passed),
+                          ';'.join(['%s=%s' % (i,j) for i,j in zip(info,values)]),
+                          ';'.join(self.format)])
+        
+    def is_homozygous(self, sample = None):
+        if sample:
+            pass
+        else:
+            return [self.alt[i-1] == self.alt[j-1] if i > 0 and j > 0 else False for i,j in self.genotype]   
+        
+    def get_alt(self, individual=0):
+        alt = []
+        for i in self.genotype[individual]:
+            if i > 0:
+                alt.append(self.alt[i-1])
+        return alt     
     
     def parse_entry(self, entry):
         entry = entry.split('\t')
-        self.chrom, self.pos, self.id, self.ref, self.alt, self.qual, filter_, info, self.format = entry[:9]
+        self.chrom, self.pos, self.id, self.ref, alt_, self.qual, filter_, info, self.format = entry[:9]
         samples = entry[9:]
-        if self.alt == '.':
-            self.alt = None
-        if filter_ == 'PASS':
+        self.alt = alt_.split(',')
+        if filter_ == 'PASS' or filter_ == '.':
             self.passed = True
         else:
-            if filter_ != '.':
-                self.passed = filter_.split(';') 
+            self.passed = filter_.split(';') 
         if info != '.':
             info_l = info.split(';')
             for v in info_l:
@@ -148,6 +211,7 @@ class VCFEntry(object):
         if 'FT' in self.format:
             self.FT = self.format.index('FT')
         #on to the samples
+        self.extra_sample_info = {}
         for n, sample in enumerate(samples):
             for info_n, sample_info in enumerate(sample.split(':')):
                 if info_n == self.GT:
@@ -172,3 +236,5 @@ class VCFEntry(object):
                 elif info_n == self.FT:
                     #not supported, I haven't encountered this yet
                     pass
+                else:
+                    self.extra_sample_info[info_n] = sample_info

@@ -1,9 +1,15 @@
 import pythomics.templates as templates
 import pythomics.genomics.structures as structure
-import csv
 
 class VCFIterator(templates.GenericIterator):
+    
     def __init__(self, filename):
+        """An iterator over the VCF file format
+        
+        This reads VCF files and has been tested on VCF 4.0.
+        The returned items are VCFEntry
+        
+        """
         super(VCFIterator, self).__init__(filename)
         #process our meta information
         row = self.filename.readline().strip()
@@ -17,6 +23,8 @@ class VCFIterator(templates.GenericIterator):
                 assert(self.vcf_file.add_format(row))
             elif row.startswith('##CONTIG='):
                 assert(self.vcf_file.add_contig(row))
+            elif row.startswith('##ALT='):
+                assert(self.vcf_file.add_alt(row))
             row = self.filename.readline().strip()
         #got to the end of meta information, we now have the header
         assert(self.vcf_file.add_header(row))
@@ -25,10 +33,10 @@ class VCFIterator(templates.GenericIterator):
         return self
     
     def next(self):
-        row = self.filename.readline()
+        row = self.filename.next()
         while not row:
-            row = self.filename.readline()
-        return self.vcf_file.add_entry( row.strip() )
+            row = self.filename.next()
+        return self.vcf_file.parse_entry( row.strip() )
 
 class GFFIterator(templates.GenericIterator):
     pass
@@ -47,4 +55,3 @@ class SamIterator(templates.GenericIterator):
 
 class PileupIterator(templates.GenericIterator):
     pass
-
