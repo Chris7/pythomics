@@ -1,11 +1,9 @@
 #!/usr/bin/env python
 
-"""
+description = """
 This script will digest a given protein fasta file with the specified enzymes
 and summarize how much of the proteome is covered, what residues are missed,
 and what isoforms can be uniquely identified.
-
-Chris Mitchell - February 3, 2014
 """
 
 import argparse, sys, copy, re
@@ -13,7 +11,7 @@ import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
 import pythomics.proteomics.config as config
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description = description)
 parser.add_argument('-f', '--file', nargs='?', help="The fasta file to process.", type=argparse.FileType('r'), default=sys.stdin)
 parser.add_argument('-o', '--out', nargs='?', help="The file to write summary to.", type=argparse.FileType('w'), default=sys.stdout)
 parser.add_argument('--min', help="Minimum cleavage length", type=int, default=7)

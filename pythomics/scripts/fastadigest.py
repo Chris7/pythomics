@@ -1,11 +1,18 @@
 #!/usr/bin/env python
 
+description = """
+This script will digest a given fasta file with the specified enzymes. 
+Both protein and nucleotide fasta files are valid inputs, and when
+digesting fasta files, it is possible to create 6 frame as well as 
+3 frame translations.
+"""
+
 import argparse, sys, itertools
 import pythomics.proteomics.config as config
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description = description)
 parser.add_argument('--enzyme', help="The enzyme to cleave with.", choices=config.ENZYMES.keys(), type=str, default='trypsin')
 parser.add_argument('-f', '--file', nargs='?', help="The fasta file to cleave.", type=argparse.FileType('r'), default=sys.stdin)
 parser.add_argument('-o', '--out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=sys.stdout)
