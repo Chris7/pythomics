@@ -97,7 +97,8 @@ def main():
             unique_proteins |= peptides_found[peptide]
     with args.out as o:
         o.write('Protein\tDetectable Length\tTotal Length\tCoverage%%\tUnique ID\t%s\n' % '\t'.join(aas))
-        sys.stderr.write('%d proteins found out of %d total proteins in database\n' % (len(unique_proteins),total))
+        sys.stderr.write('%d proteins found out of %d total proteins in database.\n' % (len(coverageMap),total))
+        sys.stderr.write('%d of these detectable proteins may be uniquely identified.\n' % (len(unique_proteins)))
         #figure out coverage
         covered = {}
         found_proteins = set([])
