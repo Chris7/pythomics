@@ -1,3 +1,4 @@
+import sys
 import pythomics.templates as templates
 import pythomics.genomics.structures as structure
 
@@ -12,8 +13,9 @@ class VCFIterator(templates.GenericIterator):
         """
         super(VCFIterator, self).__init__(filename)
         #process our meta information
-        row = self.filename.readline().strip()
+        row = self.filename.next().strip()
         self.vcf_file = structure.VCFFile(filename)
+        self.inum=0
         while row[:2] == '##':
             if row.startswith('##INFO='):
                 assert(self.vcf_file.add_info(row)==True)
@@ -25,7 +27,7 @@ class VCFIterator(templates.GenericIterator):
                 assert(self.vcf_file.add_contig(row))
             elif row.startswith('##ALT='):
                 assert(self.vcf_file.add_alt(row))
-            row = self.filename.readline().strip()
+            row = self.filename.next().strip()
         #got to the end of meta information, we now have the header
         assert(self.vcf_file.add_header(row))
             
@@ -36,6 +38,9 @@ class VCFIterator(templates.GenericIterator):
         row = self.filename.next()
         while not row:
             row = self.filename.next()
+        self.inum+=1
+        if self.inum%100000 == 0:
+            sys.stderr.write('Processed %d VCF entries\n' % self.inum)
         return self.vcf_file.parse_entry( row.strip() )
 
 class GFFIterator(templates.GenericIterator):
