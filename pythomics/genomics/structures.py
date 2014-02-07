@@ -1,3 +1,5 @@
+__author__ = 'Chris Mitchell'
+
 class VCFFile(object):
     def __init__(self, filename):
         """VCF File container
@@ -292,3 +294,44 @@ class VCFEntry(object):
                     pass
                 else:
                     self.extra_sample_info[info_n] = sample_info
+
+class GFFObject(object):
+    def __init__(self, info_delimiter=';', key_delimiter='=', quotechar='', attribute_delimiter=','):
+        self.info_delimiter = info_delimiter
+        self.key_delimiter = key_delimiter
+        self.quotechar = quotechar
+        #the attribute_delimiter is set but not used generally since commas are abused
+        #and so few GFF/GFF3/GTF files actually follow the specification.
+        #For parent/child relationships this is used however.
+        self.attribute_delimiter = attribute_delimiter
+
+    def parse_entry(self, row):
+        self.seqid, self.source, self.feature_type, self.start, self.end, \
+        self.score, self.strand, self.phase, info = row.split('\t')
+        self.attributes = {}
+        for entry in info.split(self.info_delimiter):
+            entry = entry.strip()
+            if not entry:
+                continue
+            key,value = entry.split(self.key_delimiter)
+            if self.quotechar:
+                if value.startswith(self.quotechar) and value.endswith(self.quotechar):
+                    value = value[len(self.quotechar):-1*len(self.quotechar)]
+            self.attributes[key] = value
+
+    def __len__(self):
+        return self.end-self.start
+
+    def add_child(self, child):
+        child_id = child.attributes.get('ID',None)
+        if child_id:
+            if not hasattr(self, 'children'):
+                self.children = []
+            self.children[child_id] = child
+
+    def __str__(self):
+        attributes = self.info_delimiter.join(['%s%s%s%s%s' % (self.quotechar,key,self.key_delimiter,value,self.quotechar)
+                               for key,value in self.attributes.iteritems()])
+        general = '\t'.join([self.seqid, self.source, self.feature_type, self.start, self.end, self.score,
+                             self.strand, self.phase, attributes])
+        return general
