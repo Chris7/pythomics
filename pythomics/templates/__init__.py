@@ -2,9 +2,6 @@ import gzip
 
 class GenericIterator(object):
     def __init__(self, filename, **kwrds):
-        if not filename:
-            print 'error'
-            raise KeyError
         if isinstance(filename, (str, unicode)) and filename.endswith('.gz'):
             self.filename = gzip.GzipFile(filename)
         elif isinstance(filename, (str, unicode)):
@@ -12,8 +9,7 @@ class GenericIterator(object):
         elif isinstance(filename, (file)):
             self.filename = filename
         else:
-            print 'no idea what we got'
-            raise KeyError
+            raise TypeError
         
     def __iter__(self):
         return self
