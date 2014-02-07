@@ -335,3 +335,4 @@ class GFFObject(object):
         general = '\t'.join([self.seqid, self.source, self.feature_type, self.start, self.end, self.score,
                              self.strand, self.phase, attributes])
         return general
+

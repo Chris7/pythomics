@@ -78,11 +78,49 @@ class PileupIterator(templates.GenericIterator):
     pass
 
 class GFFReader(templates.GenericIterator):
-    def __init__(self, filename, filter=[], info_delimiter=';', key_delimiter='=', quotechar=''):
+    def __init__(self, filename, fast_filter=None, info_delimiter=';', key_delimiter='=', quotechar=''):
         """This will read an entire GFF/GTF/GFF3 file and establish parent-child relations and
          allow for querying based on attributes such as transcripts, gene ids, and allow writing
          of useful file types such as fasta files of coding sequences, etc.
-         
+
         """
         super(GFFReader, self).__init__(filename)
-        pass
+        self.positions = {}
+        self.fast_attributes = {}
+        self.filters = set(fast_filter) if fast_filter else []
+        for gff_object in GFFIterator(filename, info_delimiter=info_delimiter,
+                                      key_delimiter=key_delimiter, quotechar=quotechar):
+            chrom, start, end = gff_object.seqid, int(gff_object.start), int(gff_object.end)
+            try:
+                self.positions[chrom][(start, end)].append(gff_object)
+            except KeyError:
+                try:
+                    self.positions[chrom][(start, end)] = [gff_object]
+                except KeyError:
+                    self.positions[chrom] = {(start, end): [gff_object]}
+            fast_lookup = [fast_access for fast_access in self.filters for attribute in gff_object.attributes if fast_access in attribute]
+            for fast_access in fast_lookup:
+                try:
+                    self.fast_attributes[fast_access].append(gff_object)
+                except KeyError:
+                    self.fast_attributes[fast_access] = [gff_object]
+
+    def get_attribute(self, attribute, value=None):
+        """This returns a list of gff objects with the given attribute and if supplied, those
+        attributes with the specified value
+
+        """
+        if attribute in self.filters:
+            return self.fast_attributes[attribute] if not value else\
+                [i for i in self.fast_attributes[attribute] if i.attributes.get(attribute, False)]
+
+    def get_entry(self, seqid, start, end, overlap=True):
+        d = self.positions.get(seqid,[])
+        if overlap:
+            return [gff_object for gff_start, gff_end in d
+                    for gff_object in d[(gff_start, gff_end)]
+                    if not (end <= gff_start or start >= gff_end)]
+        else:
+            return [gff_object for gff_start, gff_end in d
+                    for gff_object in d[(gff_start, gff_end)]
+                    if (gff_start >= start and gff_end >= end)]
