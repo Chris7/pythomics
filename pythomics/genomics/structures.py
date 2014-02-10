@@ -1,5 +1,7 @@
 __author__ = 'Chris Mitchell'
 
+import sys
+
 class VCFFile(object):
     def __init__(self, filename):
         """VCF File container
@@ -295,6 +297,7 @@ class VCFEntry(object):
                 else:
                     self.extra_sample_info[info_n] = sample_info
 
+
 class GFFObject(object):
     def __init__(self, info_delimiter=';', key_delimiter='=', quotechar='', attribute_delimiter=','):
         self.info_delimiter = info_delimiter
@@ -309,11 +312,17 @@ class GFFObject(object):
         self.seqid, self.source, self.feature_type, self.start, self.end, \
         self.score, self.strand, self.phase, info = row.split('\t')
         self.attributes = {}
+        self.start = int(self.start)
+        self.end = int(self.end)
         for entry in info.split(self.info_delimiter):
             entry = entry.strip()
             if not entry:
                 continue
-            key,value = entry.split(self.key_delimiter)
+            try:
+                key,value = entry.split(self.key_delimiter)
+            except ValueError:
+                sys.stderr.write('Error in info field on entry %s\n' % entry)
+                continue
             if self.quotechar:
                 if value.startswith(self.quotechar) and value.endswith(self.quotechar):
                     value = value[len(self.quotechar):-1*len(self.quotechar)]
@@ -326,13 +335,17 @@ class GFFObject(object):
         child_id = child.attributes.get('ID',None)
         if child_id:
             if not hasattr(self, 'children'):
-                self.children = []
+                self.children = {}
             self.children[child_id] = child
 
     def __str__(self):
         attributes = self.info_delimiter.join(['%s%s%s%s%s' % (self.quotechar,key,self.key_delimiter,value,self.quotechar)
                                for key,value in self.attributes.iteritems()])
-        general = '\t'.join([self.seqid, self.source, self.feature_type, self.start, self.end, self.score,
+        general = '\t'.join([self.seqid, self.source, self.feature_type, str(self.start), str(self.end), self.score,
                              self.strand, self.phase, attributes])
         return general
 
+
+class GFFFeature(object):
+    def __init__(self):
+        self.features = set([])

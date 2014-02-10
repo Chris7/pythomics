@@ -3,6 +3,8 @@ __author__ = 'Chris Mitchell'
 import sys
 import pythomics.templates as templates
 import pythomics.genomics.structures as structure
+import pythomics.genomics.config as config
+
 
 class VCFIterator(templates.GenericIterator):
     
@@ -45,6 +47,7 @@ class VCFIterator(templates.GenericIterator):
             sys.stderr.write('Processed %d VCF entries\n' % self.inum)
         return self.vcf_file.parse_entry( row.strip() )
 
+
 class GFFIterator(templates.GenericIterator):
     def __init__(self, filename, info_delimiter=';', key_delimiter='=', quotechar=''):
         super(GFFIterator, self).__init__(filename)
@@ -65,29 +68,41 @@ class GFFIterator(templates.GenericIterator):
         ob.parse_entry(row)
         return ob
 
+
 class BedIterator(templates.GenericIterator):
     pass
+
 
 class BamIterator(templates.GenericIterator):
     pass
 
+
 class SamIterator(templates.GenericIterator):
     pass
 
+
 class PileupIterator(templates.GenericIterator):
     pass
+
 
 class GFFReader(templates.GenericIterator):
     def __init__(self, filename, fast_filter=None, info_delimiter=';', key_delimiter='=', quotechar=''):
         """This will read an entire GFF/GTF/GFF3 file and establish parent-child relations and
          allow for querying based on attributes such as transcripts, gene ids, and allow writing
-         of useful file types such as fasta files of coding sequences, etc.
+         of useful file types such as fasta files of coding sequences, etc. It works at the
+         "feature" level, which allows for grouping of exons of a gene and so on.
+
+         The implementation is liberal because GFF/GFF3/GTF standards are so poorly followed. So
+         errors such as a missing parent feature will be reported, but not break usage.
 
         """
         super(GFFReader, self).__init__(filename)
         self.positions = {}
         self.fast_attributes = {}
         self.filters = set(fast_filter) if fast_filter else []
+        GFF_TAGS = config.GFF_TAGS
+        self.feature_map = {}
+        child_list = []
         for gff_object in GFFIterator(filename, info_delimiter=info_delimiter,
                                       key_delimiter=key_delimiter, quotechar=quotechar):
             chrom, start, end = gff_object.seqid, int(gff_object.start), int(gff_object.end)
@@ -104,6 +119,28 @@ class GFFReader(templates.GenericIterator):
                     self.fast_attributes[fast_access].append(gff_object)
                 except KeyError:
                     self.fast_attributes[fast_access] = [gff_object]
+            known_tags = set([attribute for attribute in gff_object.attributes if attribute in GFF_TAGS])
+            if 'ID' in known_tags:
+                gff_id = gff_object.attributes.get('ID',None)
+                if gff_id:
+                    try:
+                        gff_feature = self.feature_map[gff_id]
+                    except KeyError:
+                        feature = structure.GFFFeature()
+                        feature.features.add( gff_object )
+                        self.feature_map[gff_id] = feature
+            if 'Parent' in known_tags:
+                child_list.append(gff_object)
+        #Add parent-child relationships here since all GFF objects will be made at this point
+        for child_gff_object in child_list:
+            for parent_id in child_gff_object.attributes['Parent'].split(','):
+                parent_gff_object = self.id_map.get(parent_id, None)
+                if parent_gff_object:
+                    parent_gff_object.add_child( child_gff_object )
+                else:
+                    sys.stderr.write('Missing Parent Feature: %s\n' % parent_id)
+
+
 
     def get_attribute(self, attribute, value=None):
         """This returns a list of gff objects with the given attribute and if supplied, those
@@ -124,3 +161,5 @@ class GFFReader(templates.GenericIterator):
             return [gff_object for gff_start, gff_end in d
                     for gff_object in d[(gff_start, gff_end)]
                     if (gff_start >= start and gff_end >= end)]
+
+gff = GFFReader('/home/chris/git/pythomics/pythomics/tests/sample_gff.gff3')
