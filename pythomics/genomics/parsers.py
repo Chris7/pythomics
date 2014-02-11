@@ -86,7 +86,8 @@ class PileupIterator(templates.GenericIterator):
 
 
 class GFFReader(templates.GenericIterator):
-    def __init__(self, filename, fast_filter=None, info_delimiter=';', key_delimiter='=', quotechar=''):
+    def __init__(self, filename, fast_filter=None, info_delimiter=';', key_delimiter='=', quotechar='',
+                 tag_map={'ID': 'ID', 'Parent': 'Parent'}):
         """This will read an entire GFF/GTF/GFF3 file and establish parent-child relations and
          allow for querying based on attributes such as transcripts, gene ids, and allow writing
          of useful file types such as fasta files of coding sequences, etc. It works at the
@@ -101,6 +102,8 @@ class GFFReader(templates.GenericIterator):
         self.fast_attributes = {}
         self.filters = set(fast_filter) if fast_filter else []
         GFF_TAGS = config.GFF_TAGS
+        id_tag = tag_map['ID']
+        parent_tag = tag_map['Parent']
         self.feature_map = {}
         child_list = []
         for gff_object in GFFIterator(filename, info_delimiter=info_delimiter,
@@ -120,38 +123,78 @@ class GFFReader(templates.GenericIterator):
                 except KeyError:
                     self.fast_attributes[fast_access] = [gff_object]
             known_tags = set([attribute for attribute in gff_object.attributes if attribute in GFF_TAGS])
-            if 'ID' in known_tags:
+            if id_tag in known_tags:
                 gff_id = gff_object.attributes.get('ID',None)
                 if gff_id:
                     try:
                         gff_feature = self.feature_map[gff_id]
                     except KeyError:
-                        feature = structure.GFFFeature()
-                        feature.features.add( gff_object )
-                        self.feature_map[gff_id] = feature
-            if 'Parent' in known_tags:
-                child_list.append(gff_object)
+                        gff_feature = structure.GFFFeature(gff_id)
+                        gff_feature.features.add(gff_object)
+                        self.feature_map[gff_id] = gff_feature
+                    #This is kept in the known_tags valid ID block, if we don't use IDs we shouldn't
+                    #be using parent-child relations either
+                    if parent_tag in known_tags:
+                        child_list.append(gff_feature)
+            else:
+                #this is a poorly formed GFF file and feature relations cannot be clearly established
+                gff_id = str(len(self.feature_map))
+                gff_feature = structure.GFFFeature(gff_id)
+                gff_feature.features.add(gff_object)
+                self.feature_map[gff_id] = gff_feature
         #Add parent-child relationships here since all GFF objects will be made at this point
-        for child_gff_object in child_list:
-            for parent_id in child_gff_object.attributes['Parent'].split(','):
-                parent_gff_object = self.id_map.get(parent_id, None)
-                if parent_gff_object:
-                    parent_gff_object.add_child( child_gff_object )
+        for child_gff_feature in child_list:
+            #get parents from the gff entries
+            parent_ids = [feature.attributes['Parent'] for feature in child_gff_feature.features
+                          if feature.attributes.has_key('Parent')]
+            parent_features = set([j for i in parent_ids for j in i.split(',')])
+            for parent_feature_name in parent_features:
+                parent_feature = self.feature_map.get(parent_feature_name, None)
+                if parent_feature:
+                    parent_feature.add_child(child_gff_feature)
                 else:
-                    sys.stderr.write('Missing Parent Feature: %s\n' % parent_id)
+                    sys.stderr.write('Missing Parent Feature: %s\n' % parent_feature_name)
 
-
-
-    def get_attribute(self, attribute, value=None):
-        """This returns a list of gff objects with the given attribute and if supplied, those
+    def get_attribute(self, attribute, value=None, features=False):
+        """This returns a list of GFF objects (or GFF Features) with the given attribute and if supplied, those
         attributes with the specified value
 
+        :param attribute: The 'info' field attribute we are querying
+        :param value: Optional keyword, only return attributes equal to this value
+        :param features: Optional keyword, return GFF Features instead of GFF Objects
+        :return: A list of GFF objects (or GFF features if requested)
         """
         if attribute in self.filters:
-            return self.fast_attributes[attribute] if not value else\
-                [i for i in self.fast_attributes[attribute] if i.attributes.get(attribute, False)]
+            valid_gff_objects = self.fast_attributes[attribute] if not value else\
+                [i for i in self.fast_attributes[attribute] if i.attributes.get(attribute, False) == value]
+            if features:
+                valid_ids = [gff_object.attributes.get('ID', None) for gff_object in valid_gff_objects]
+                return [self.feature_map[gff_id] for gff_id in valid_ids if gff_id]
+            else:
+                return valid_gff_objects
+        else:
+            valid_gff_objects = [gff_object for gff_feature in self.feature_map.values()
+                              for gff_object in gff_feature.features
+                              if gff_object.attributes.get(attribute, False)]
+            valid_gff_objects = valid_gff_objects if not value else [gff_object for gff_object in valid_gff_objects
+                                                                     if gff_object.attributes[attribute] == value]
+            if features:
+                valid_ids = [gff_object.attributes.get('ID', None) for gff_object in valid_gff_objects]
+                return [self.feature_map[gff_id] for gff_id in valid_ids if gff_id]
+            else:
+                return valid_gff_objects
 
-    def get_entry(self, seqid, start, end, overlap=True):
+    def contains(self, seqid, start, end, overlap=True):
+        """This returns a list of GFF objects which cover a specified location.
+
+        :param seqid: The landmark identifier (usually a chromosome)
+        :param start: The 1-based position of the start of the range we are querying
+        :param end: The 1-based position of the end of the range we are querying
+        :param overlap: A boolean value, if true we allow features to overlap the query range.
+        For instance, overlap=True with the range (5,10), will return a GFF object
+        spanning from (8,15). overlap=False will only return objects fully containing the range.
+        :return: A list of GFF objects
+        """
         d = self.positions.get(seqid,[])
         if overlap:
             return [gff_object for gff_start, gff_end in d
@@ -162,4 +205,11 @@ class GFFReader(templates.GenericIterator):
                     for gff_object in d[(gff_start, gff_end)]
                     if (gff_start >= start and gff_end >= end)]
 
-gff = GFFReader('/home/chris/git/pythomics/pythomics/tests/sample_gff.gff3')
+    def get_feature(self, feature_id):
+        """This returns a GFF Feature object corresponding to the
+        provided id.
+
+        :param feature_id: The ID of the feature we wish to fetch
+        :return: A GFF Feature object or None if it does not exist.
+        """
+        return self.feature_map.get(feature_id, None)

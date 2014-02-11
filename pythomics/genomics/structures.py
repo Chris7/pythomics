@@ -331,15 +331,8 @@ class GFFObject(object):
     def __len__(self):
         return self.end-self.start
 
-    def add_child(self, child):
-        child_id = child.attributes.get('ID',None)
-        if child_id:
-            if not hasattr(self, 'children'):
-                self.children = {}
-            self.children[child_id] = child
-
     def __str__(self):
-        attributes = self.info_delimiter.join(['%s%s%s%s%s' % (self.quotechar,key,self.key_delimiter,value,self.quotechar)
+        attributes = self.info_delimiter.join(['%s%s%s%s%s' % (key,self.key_delimiter,self.quotechar,value,self.quotechar)
                                for key,value in self.attributes.iteritems()])
         general = '\t'.join([self.seqid, self.source, self.feature_type, str(self.start), str(self.end), self.score,
                              self.strand, self.phase, attributes])
@@ -347,5 +340,27 @@ class GFFObject(object):
 
 
 class GFFFeature(object):
-    def __init__(self):
+    def __init__(self, id):
         self.features = set([])
+        self.id = id
+
+    def add_child(self, child):
+        """Children are GFFFeatures and are defined when added. This is done to avoid memory overheads
+        that may be incurred by GFF files that have millions of rows.
+
+        """
+        child_id = getattr(child, 'id', None)
+        if child_id:
+            if not hasattr(self, 'children'):
+                self.children = {}
+            if child_id not in self.children:
+                self.children[child_id] = child
+
+    def get_children(self):
+        """A dictionary of GFF features which are children of this feature
+
+
+        :return: A dictionary of children GFF Features
+        """
+        return {} if not hasattr(self, 'children') else self.children
+    
