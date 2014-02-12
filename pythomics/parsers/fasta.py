@@ -31,10 +31,10 @@ class FastaIterator(templates.GenericIterator):
                 self.fasta_index = '%s.%s' % (self.fasta_file.name, 'fai')
             elif os.path.exists( '%s.%s' % (self.fasta_file.name, 'faidx')):
                 self.fasta_index = '%s.%s' % (self.fasta_file.name, 'faidx')
-            else:
-                self.fasta_index = None
             if self.fasta_index:
                 self.open_fasta_index()
+            else:
+                self.fasta_index = None
         self.sequence_index = {}
         self.row = None
         
@@ -108,9 +108,9 @@ class FastaIterator(templates.GenericIterator):
         #go to start of chromosome
         seekpos = int(self.sequence_index[chrom][1])
         #find how many newlines we have
-        seekpos+=start+(start)/divisor
+        seekpos += start+(start)/divisor
         slen = end-start
-        endpos=slen+slen/divisor+1 #a hack of sorts but it works and is easy
+        endpos = slen+slen/divisor+1 #a hack of sorts but it works and is easy
         self.fasta_file.seek(seekpos, 0)
         output = self.fasta_file.read(endpos)
         output = output.replace('\n', '')
