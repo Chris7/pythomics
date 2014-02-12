@@ -359,8 +359,13 @@ class GFFFeature(object):
     def get_children(self):
         """A dictionary of GFF features which are children of this feature
 
-
         :return: A dictionary of children GFF Features
         """
         return {} if not hasattr(self, 'children') else self.children
-    
+
+    def parts(self):
+        """A generator consisting GFFObjects within this feature
+
+        """
+        for i in self.features:
+            yield i

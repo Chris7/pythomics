@@ -1,6 +1,6 @@
 __author__ = 'Chris Mitchell'
 
-import sys
+import sys, copy
 import pythomics.templates as templates
 import pythomics.genomics.structures as structure
 import pythomics.genomics.config as config
@@ -87,7 +87,7 @@ class PileupIterator(templates.GenericIterator):
 
 class GFFReader(templates.GenericIterator):
     def __init__(self, filename, fast_filter=None, info_delimiter=';', key_delimiter='=', quotechar='',
-                 tag_map={'ID': 'ID', 'Parent': 'Parent'}):
+                 tag_map={'ID': 'ID', 'Parent': 'Parent'}, preset=None):
         """This will read an entire GFF/GTF/GFF3 file and establish parent-child relations and
          allow for querying based on attributes such as transcripts, gene ids, and allow writing
          of useful file types such as fasta files of coding sequences, etc. It works at the
@@ -96,16 +96,31 @@ class GFFReader(templates.GenericIterator):
          The implementation is liberal because GFF/GFF3/GTF standards are so poorly followed. So
          errors such as a missing parent feature will be reported, but not break usage.
 
+        :param filename: GFF file to read
+        :param fast_filter: A list of attributes to keep in memory a reference to for fast querying
+        :param info_delimiter: The character to split the info field on (default: ";")
+        :param key_delimiter: The character to split the key-value pairings of the info field on (default: "=")
+        :param quotechar: The character surrounding values in the info field (default: None)
+        :param tag_map: A dictionary which can substitute the ID and Parent tags for alternatives
+        :param preset: A string identifying various presets (choices: cufflinks)
         """
         super(GFFReader, self).__init__(filename)
         self.positions = {}
         self.fast_attributes = {}
         self.filters = set(fast_filter) if fast_filter else []
-        GFF_TAGS = config.GFF_TAGS
-        id_tag = tag_map['ID']
-        parent_tag = tag_map['Parent']
+        GFF_TAGS = copy.deepcopy(config.GFF_TAGS)
         self.feature_map = {}
         child_list = []
+        if preset and preset.lower() == 'cufflinks':
+            key_delimiter=' '
+            quotechar='"'
+            self.id_tag = 'transcript_id'
+            self.parent_tag = 'gene_id'#'transcript_id'#it's weird, but we're our own parent
+        else:
+            self.id_tag = tag_map['ID']
+            self.parent_tag = tag_map['Parent']
+        GFF_TAGS.add(self.id_tag)
+        GFF_TAGS.add(self.parent_tag)
         for gff_object in GFFIterator(filename, info_delimiter=info_delimiter,
                                       key_delimiter=key_delimiter, quotechar=quotechar):
             chrom, start, end = gff_object.seqid, int(gff_object.start), int(gff_object.end)
@@ -123,19 +138,19 @@ class GFFReader(templates.GenericIterator):
                 except KeyError:
                     self.fast_attributes[fast_access] = [gff_object]
             known_tags = set([attribute for attribute in gff_object.attributes if attribute in GFF_TAGS])
-            if id_tag in known_tags:
-                gff_id = gff_object.attributes.get('ID',None)
+            if self.id_tag in known_tags:
+                gff_id = gff_object.attributes.get(self.id_tag, None)
                 if gff_id:
                     try:
                         gff_feature = self.feature_map[gff_id]
                     except KeyError:
                         gff_feature = structure.GFFFeature(gff_id)
-                        gff_feature.features.add(gff_object)
                         self.feature_map[gff_id] = gff_feature
+                    gff_feature.features.add(gff_object)
                     #This is kept in the known_tags valid ID block, if we don't use IDs we shouldn't
                     #be using parent-child relations either
-                    if parent_tag in known_tags:
-                        child_list.append(gff_feature)
+                    if self.parent_tag in known_tags:
+                        child_list.append(gff_object)
             else:
                 #this is a poorly formed GFF file and feature relations cannot be clearly established
                 gff_id = str(len(self.feature_map))
@@ -143,17 +158,18 @@ class GFFReader(templates.GenericIterator):
                 gff_feature.features.add(gff_object)
                 self.feature_map[gff_id] = gff_feature
         #Add parent-child relationships here since all GFF objects will be made at this point
-        for child_gff_feature in child_list:
+        for child_gff_object in child_list:
             #get parents from the gff entries
-            parent_ids = [feature.attributes['Parent'] for feature in child_gff_feature.features
-                          if feature.attributes.has_key('Parent')]
-            parent_features = set([j for i in parent_ids for j in i.split(',')])
-            for parent_feature_name in parent_features:
-                parent_feature = self.feature_map.get(parent_feature_name, None)
-                if parent_feature:
-                    parent_feature.add_child(child_gff_feature)
-                else:
-                    sys.stderr.write('Missing Parent Feature: %s\n' % parent_feature_name)
+            parent_ids = child_gff_object.attributes[self.parent_tag].split(',')
+            for parent_id in parent_ids:
+                parent_feature = self.feature_map.get(parent_id, None)
+                if not parent_feature:
+                    #missing the parent feature, make it but complain about it
+                    parent_feature = structure.GFFFeature(parent_id)
+                    self.feature_map[parent_id] = parent_feature
+                    sys.stderr.write('Missing Parent Feature: %s\n' % parent_id)
+                parent_feature.add_child(self.feature_map.get(child_gff_object.attributes.get(self.id_tag, None)))
+
 
     def get_attribute(self, attribute, value=None, features=False):
         """This returns a list of GFF objects (or GFF Features) with the given attribute and if supplied, those
@@ -168,7 +184,7 @@ class GFFReader(templates.GenericIterator):
             valid_gff_objects = self.fast_attributes[attribute] if not value else\
                 [i for i in self.fast_attributes[attribute] if i.attributes.get(attribute, False) == value]
             if features:
-                valid_ids = [gff_object.attributes.get('ID', None) for gff_object in valid_gff_objects]
+                valid_ids = [gff_object.attributes.get(self.id_tag, None) for gff_object in valid_gff_objects]
                 return [self.feature_map[gff_id] for gff_id in valid_ids if gff_id]
             else:
                 return valid_gff_objects
@@ -179,7 +195,7 @@ class GFFReader(templates.GenericIterator):
             valid_gff_objects = valid_gff_objects if not value else [gff_object for gff_object in valid_gff_objects
                                                                      if gff_object.attributes[attribute] == value]
             if features:
-                valid_ids = [gff_object.attributes.get('ID', None) for gff_object in valid_gff_objects]
+                valid_ids = [gff_object.attributes.get(self.id_tag, None) for gff_object in valid_gff_objects]
                 return [self.feature_map[gff_id] for gff_id in valid_ids if gff_id]
             else:
                 return valid_gff_objects
@@ -212,4 +228,7 @@ class GFFReader(templates.GenericIterator):
         :param feature_id: The ID of the feature we wish to fetch
         :return: A GFF Feature object or None if it does not exist.
         """
-        return self.feature_map.get(feature_id, None)
+        return self.feature_map.get(feature_id)
+
+    def get_features(self):
+        return self.feature_map.iteritems()
