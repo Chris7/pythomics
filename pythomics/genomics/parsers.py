@@ -234,7 +234,7 @@ class GFFReader(templates.GenericIterator):
         return self.feature_map.iteritems()
 
 class VCFReader(templates.GenericIterator):
-    def __init__(self, filename):
+    def __init__(self, filename, append_chromosome=False):
         """This will read an entire VCF file and allow for querying based on attributes such
          location, individuals.
 
@@ -245,11 +245,12 @@ class VCFReader(templates.GenericIterator):
         self.positions = {}
         for vcf_entry in VCFIterator(filename):
             chrom, start = vcf_entry.chrom, vcf_entry.pos
+            if append_chromosome:
+                chrom = 'chr%s' % chrom
             start = int(start)
-            for length in vcf_entry.get_alt_lengths():
-                if length is None:
-                    continue
-                end = start+abs(length)
+            furthest_end = max([abs(i) if i else None for i in vcf_entry.get_alt_lengths()])
+            if furthest_end:
+                end = start+abs(furthest_end)
                 try:
                     self.positions[chrom][(start, end)].append(vcf_entry)
                 except KeyError:
@@ -273,7 +274,7 @@ class VCFReader(templates.GenericIterator):
         if overlap:
             return [vcf_entry for vcf_start, vcf_end in d
                     for vcf_entry in d[(vcf_start, vcf_end)]
-                    if not (end <= vcf_start or start >= vcf_end)]
+                    if not (end < vcf_start or start > vcf_end)]
         else:
             return [vcf_entry for vcf_start, vcf_end in d
                     for vcf_entry in d[(vcf_start, vcf_end)]
