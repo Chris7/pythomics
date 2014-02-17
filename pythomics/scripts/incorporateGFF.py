@@ -116,7 +116,7 @@ def main():
                 seq = ''.join([fasta_file.get_sequence(gff_object.seqid, gff_object.start, gff_object.end) for gff_object, _ in gff_objects])
             if gff_object.strand == '-':
                 seq = fasta._reverse_complement(seq)
-            #o.write('>%s\n%s\n' % (feature_name, seq))
+            o.write('>%s\n%s\n' % (feature_name, seq))
 
 if __name__ == "__main__":
     sys.exit(main())
