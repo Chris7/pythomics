@@ -16,8 +16,8 @@ parser.add_argument('-f', '--file', nargs='?', help="The fasta file to process."
 parser.add_argument('-o', '--out', nargs='?', help="The file to write summary to.", type=argparse.FileType('w'), default=sys.stdout)
 parser.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
 parser.add_argument('--max', help="Maximum cleavage length", type=int, default=30)
-parser.add_argument('--parallel', help="Should cleavages be done in parallel (default is serial digestion)?", action='store_true')
-parser.add_argument('--series', help="Should cleavages be done in series? (default)", action='store_true')
+parser.add_argument('--parallel', help="Should cleavages be done in parallel (default is serial digestion)?", action='store_true', default=False)
+parser.add_argument('--series', help="Should cleavages be done in series? (default)", action='store_true', default=True)
 parser.add_argument('--enzyme', help="Enzyme to use. Pass a command separated list (no spaces); "
                     "the order of enzymes will be the order of digestion if digesting in series.", type=str, default='trypsin')
 

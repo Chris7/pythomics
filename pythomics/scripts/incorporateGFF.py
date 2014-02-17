@@ -11,27 +11,27 @@ import pythomics.genomics.parsers as gp
 description = """
 This script will incorporate the a given GFF file into a specified
 fasta file. It can also incorporate variants given in a VCF file
-while generating this fasta file (eventually).
+while generating this fasta file.
 """
 
 parser = argparse.ArgumentParser(description = description)
 parser.add_argument('-f', '--fasta', nargs='?', help="The fasta file to reference.", type=argparse.FileType('r'), default=sys.stdin)
 parser.add_argument('-o', '--out', nargs='?', help="The file to write resulting fasta file to.", type=argparse.FileType('w'), default=sys.stdout)
 parser.add_argument_group('GFF file related options')
-parser.add_argument('--gff', help="The GFF file to use.", type=argparse.FileType('r'))
+parser.add_argument('--gff', help="The GFF file to use.", type=argparse.FileType('r'), required=True)
 parser.add_argument('--group-on', help="The key to group entries together by (such as transcript_id)", type=str, default='ID')
-parser.add_argument('--cufflinks', help="If the gff file is in the standard cufflinks output", action='store_true')
+parser.add_argument('--cufflinks', help="If the gff file is in the standard cufflinks output", action='store_true', default=False)
 parser.add_argument_group('VCF file related options')
 parser.add_argument('--vcf', help="The VCF file to use.", type=argparse.FileType('r'))
-parser.add_argument('--no-homozygous', help="Don't include homozygous variants (default to include)", action='store_false')
-parser.add_argument('--heterozygous', help="Use heterozygous variants", action='store_true')
-parser.add_argument('--no-snps', help="Don't use SNPs (default to true).", action='store_false')
-parser.add_argument('--dels', help="Use Deletions.", action='store_true')
-parser.add_argument('--ins', help="Use Insertions.", action='store_true')
+parser.add_argument('--no-homozygous', help="Don't include homozygous variants (default to include)", action='store_false', default=False)
+parser.add_argument('--heterozygous', help="Use heterozygous variants", action='store_true', default=False)
+parser.add_argument('--no-snps', help="Use SNPs (default to False).", action='store_false', default=False)
+parser.add_argument('--dels', help="Use Deletions.", action='store_true', default=False)
+parser.add_argument('--ins', help="Use Insertions.", action='store_true', default=False)
 parser.add_argument('--individual', help="The Individual to use.", type=int, default=1)
-parser.add_argument('--append-chromosome', help="Should 'chr' be appended to the chromosome column?.", action='store_true')
-parser.add_argument_group('Splice Junction Options (if a variant falls over a exon-exon junction)')
-parser.add_argument('--splice-partial', help="Partially splice variants (only include exonic portions of variant)", action='store_true')
+parser.add_argument('--append-chromosome', help="Should 'chr' be appended to the chromosome column?.", action='store_true', default=False)
+parser.add_argument_group('Splice Junction Options (if a variant falls over a exon-exon junction. Default is to ignore.)')
+parser.add_argument('--splice-partial', help="Partially splice variants (only include exonic portions of variant)", action='store_true', default=False)
 
 
 def main():
