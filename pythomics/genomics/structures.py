@@ -18,35 +18,35 @@ class VCFFile(object):
         self.n_individuals = 0
         self.individuals = {}
         self.entries = {}
-        
+
     def add_info(self, entry):
         """Parses the VCF Info field and returns a VCFMeta object"""
         return self.meta.add_info(entry)
-        
+
     def add_filter(self, entry):
         """Parses the VCF Filter field and returns a VCFMeta object"""
         return self.meta.add_filter(entry)
-        
+
     def add_format(self, entry):
         """Parses the VCF Format field and returns a VCFMeta object"""
         return self.meta.add_format(entry)
-    
+
     def add_header(self, entry):
         """Parses the VCF Header field and returns the number of samples in the VCF file"""
         info = entry.split('\t')
         self.n_individuals = len(info)-9
         for i in xrange(self.n_individuals):
-            self.individuals[i] = [] 
+            self.individuals[i] = []
         return self.n_individuals > 0
-    
+
     def add_contig(self, entry):
         """Not Implemented"""
         return True
-    
+
     def add_alt(self, entry):
         """This adds an alternative allele as specified by the VCF meta information and returns a VCFMeta object"""
         return self.meta.add_alt(entry)
-    
+
     def parse_entry(self, row):
         """Parse an individual VCF entry and return a VCFEntry which contains information about
         the call (such as alternative allele, zygosity, etc.)
@@ -55,17 +55,17 @@ class VCFFile(object):
         var_call = VCFEntry(self.n_individuals)
         var_call.parse_entry(row)
         return var_call
-    
+
     def add_entry(self, row):
         """This will parse the VCF entry and also store it within the VCFFile. It will also
         return the VCFEntry as well.
 
         """
-        var_call = VCFEntry(self.n_individuals) 
+        var_call = VCFEntry(self.n_individuals)
         var_call.parse_entry( row )
-        self.entries[(var_call.chrom, var_call.pos)] = var_call  
+        self.entries[(var_call.chrom, var_call.pos)] = var_call
         return var_call
-    
+
 class VCFMeta(object):
 
     def __init__(self):
@@ -79,7 +79,7 @@ class VCFMeta(object):
         self.filter = {}
         self.format = {}
         self.type_map = {'Integer': int, 'Float': float, 'Numeric': float, 'Character': str, 'String': str, 'Flag': int}
-        
+
     def add_info(self, entry):
         """Parse and store the info field"""
         entry = entry[8:-1]
@@ -96,14 +96,14 @@ class VCFMeta(object):
                     value = -1
                 self.info[id_]['num_entries'] = value
             elif key == 'Type':
-                self.info[id_]['type'] = self.type_map[value] 
+                self.info[id_]['type'] = self.type_map[value]
             elif key == 'Description':
                 self.info[id_]['description'] = value
                 if len(info) > 4:
                     self.info[id_]['description'] += '; '.join(info[4:])
                 break
         return True
-    
+
     def add_filter(self, entry):
         """Parse and store the filter field"""
         entry = entry[10:-1]
@@ -120,7 +120,7 @@ class VCFMeta(object):
                 if len(info) > 2:
                     self.info[id_]['description'] += '; '.join(info[2:])
         return True
-    
+
     def add_format(self, entry):
         """Parse and store the format field"""
         entry = entry[10:-1]
@@ -137,14 +137,14 @@ class VCFMeta(object):
                     value = -1
                 self.format[id_]['num_entries'] = value
             elif key == 'Type':
-                self.format[id_]['type'] = self.type_map[value] 
+                self.format[id_]['type'] = self.type_map[value]
             elif key == 'Description':
                 self.format[id_]['description'] = value
                 if len(info) > 4:
                     self.format[id_]['description'] += '; '.join(info[4:])
                 break
         return True
-    
+
     def add_alt(self, entry):
         """Parse and store the alternative allele field"""
         entry = entry[7:-1]
@@ -155,14 +155,14 @@ class VCFMeta(object):
             key, value = v.split('=')
             if key == 'ID':
                 self.format[value] = {}
-                id_ = value 
+                id_ = value
             elif key == 'Description':
                 self.format[id_]['description'] = value
                 if len(info) > 4:
                     self.format[id_]['description'] += '; '.join(info[4:])
                 break
         return True
-    
+
 class VCFEntry(object):
     def __init__(self, individuals):
         """The VCFEntry object holds our sample information such as the
@@ -182,7 +182,7 @@ class VCFEntry(object):
         self.DP = -1
         self.FT = -1
         self.ploidy = 2
-        
+
     def __str__(self):
         """Returns the VCF entry as it appears in the vcf file, minus sample info currently"""
         info = self.info.keys()
@@ -197,7 +197,7 @@ class VCFEntry(object):
                           'PASS' if self.passed else ';'.join(self.passed),
                           ';'.join(['%s=%s' % (i,j) for i,j in zip(info,values)]),
                           ';'.join(self.format)])
-        
+
     def is_homozygous(self, sample = None):
         """This will give a boolean list corresponding to whether each individual
         is homozygous for the alternative allele.
@@ -217,7 +217,7 @@ class VCFEntry(object):
             pass
         else:
             return [True if ((i == 0 and j > 0) or (i > 0 and j == 0)) else False for i,j in self.genotype]
-        
+
     def get_alt(self, individual=0):
         """Returns the alternative alleles of the individual as a list"""
         return [self.alt[i-1].replace('.','') for i in filter(lambda x: x>0, self.genotype[individual])]
@@ -226,21 +226,39 @@ class VCFEntry(object):
         """Returns the number of basepairs of each alternative allele"""
         return [len(self.alt[i-1].replace('.','')) for i in filter(lambda x: x>0, self.genotype[individual])]
 
+    def get_alt_lengths(self):
+        """Returns the longest length of the variant. For deletions, return is negative,
+        SNPs return 0, and insertions are +. None return corresponds to no variant in interval
+        for specified individual
+
+        """
+        #this is a hack to store the # of individuals without having to actually store it
+        out = []
+        for i in xrange(len(self.genotype)):
+            valid_alt = self.get_alt_length(individual=i)
+            if not valid_alt:
+                out.append(None)
+            else:
+                out.append(max(valid_alt)-len(self.ref))
+        return out
+
     def has_snp(self, individual=0):
         """Returns a boolean list of SNP status, ordered by samples"""
         alts = self.get_alt(individual=individual)
-        return [i != self.ref and i == len(self.ref) for i in alts]
+        return [i != self.ref and len(i) == len(self.ref) for i in alts]
 
     def has_insertion(self, individual=0):
         """Returns a boolean list of insertion status, ordered by samples"""
         alts = self.get_alt(individual=individual)
-        return [i != self.ref and i > len(self.ref) for i in alts]
+        return [i != self.ref and len(i) > len(self.ref) for i in alts]
 
     def has_deletion(self, individual=0):
         """Returns a boolean list of deletion status, ordered by samples"""
         alts = self.get_alt(individual=individual)
-        return [i != self.ref and i < len(self.ref) for i in alts]
-    
+        if alts:
+            return [i != self.ref and len(i) < len(self.ref) for i in alts]
+        return [False]
+
     def parse_entry(self, entry):
         """This parses a VCF row and stores the relevant information"""
         entry = entry.split('\t')
@@ -250,7 +268,7 @@ class VCFEntry(object):
         if filter_ == 'PASS' or filter_ == '.':
             self.passed = True
         else:
-            self.passed = filter_.split(';') 
+            self.passed = filter_.split(';')
         if info != '.':
             info_l = info.split(';')
             for v in info_l:
