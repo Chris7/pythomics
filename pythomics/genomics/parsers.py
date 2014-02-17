@@ -219,7 +219,7 @@ class GFFReader(templates.GenericIterator):
         else:
             return [gff_object for gff_start, gff_end in d
                     for gff_object in d[(gff_start, gff_end)]
-                    if (gff_start >= start and gff_end >= end)]
+                    if (gff_start <= start and gff_end >= end)]
 
     def get_feature(self, feature_id):
         """This returns a GFF Feature object corresponding to the
@@ -232,3 +232,49 @@ class GFFReader(templates.GenericIterator):
 
     def get_features(self):
         return self.feature_map.iteritems()
+
+class VCFReader(templates.GenericIterator):
+    def __init__(self, filename):
+        """This will read an entire VCF file and allow for querying based on attributes such
+         location, individuals.
+
+        :param filename: GFF file to read
+
+        """
+        super(VCFReader, self).__init__(filename)
+        self.positions = {}
+        for vcf_entry in VCFIterator(filename):
+            chrom, start = vcf_entry.chrom, vcf_entry.pos
+            start = int(start)
+            for length in vcf_entry.get_alt_lengths():
+                if length is None:
+                    continue
+                end = start+abs(length)
+                try:
+                    self.positions[chrom][(start, end)].append(vcf_entry)
+                except KeyError:
+                    try:
+                        self.positions[chrom][(start, end)] = [vcf_entry]
+                    except KeyError:
+                        self.positions[chrom] = {(start, end): [vcf_entry]}
+
+    def contains(self, chrom, start, end, overlap=True):
+        """This returns a list of VCFEntry objects which cover a specified location.
+
+        :param chrom: The landmark identifier (usually a chromosome)
+        :param start: The 1-based position of the start of the range we are querying
+        :param end: The 1-based position of the end of the range we are querying
+        :param overlap: A boolean value, if true we allow features to overlap the query range.
+        For instance, overlap=True with the range (5,10), will return a VCFEntry object
+        spanning from (8,15). overlap=False will only return objects fully containing the range.
+        :return: A list of VCFEntry objects
+        """
+        d = self.positions.get(chrom,[])
+        if overlap:
+            return [vcf_entry for vcf_start, vcf_end in d
+                    for vcf_entry in d[(vcf_start, vcf_end)]
+                    if not (end <= vcf_start or start >= vcf_end)]
+        else:
+            return [vcf_entry for vcf_start, vcf_end in d
+                    for vcf_entry in d[(vcf_start, vcf_end)]
+                    if (vcf_start <= start and vcf_end >= end)]

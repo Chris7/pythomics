@@ -218,13 +218,18 @@ class VCFEntry(object):
         else:
             return [True if ((i == 0 and j > 0) or (i > 0 and j == 0)) else False for i,j in self.genotype]
 
-    def get_alt(self, individual=0):
+    def get_alt(self, individual=0, nucleotides_only=True):
         """Returns the alternative alleles of the individual as a list"""
-        return [self.alt[i-1].replace('.','') for i in filter(lambda x: x>0, self.genotype[individual])]
+        #not i.startswith(',') is put in to handle cases like <DEL:ME:ALU> where we have no alternate allele
+        #but some reference
+        if nucleotides_only:
+            return [self.alt[i-1].replace('.','') for i in self.genotype[individual] if i > 0 and not self.alt[i-1].startswith('<')]
+        else:
+            return [self.alt[i-1].replace('.','') for i in self.genotype[individual] if i > 0]
 
     def get_alt_length(self, individual=0):
         """Returns the number of basepairs of each alternative allele"""
-        return [len(self.alt[i-1].replace('.','')) for i in filter(lambda x: x>0, self.genotype[individual])]
+        return [len(self.alt[i-1].replace('.','')) for i in self.genotype[individual] if i > 0 and not self.alt[i-1].startswith('<')]
 
     def get_alt_lengths(self):
         """Returns the longest length of the variant. For deletions, return is negative,
@@ -245,12 +250,16 @@ class VCFEntry(object):
     def has_snp(self, individual=0):
         """Returns a boolean list of SNP status, ordered by samples"""
         alts = self.get_alt(individual=individual)
-        return [i != self.ref and len(i) == len(self.ref) for i in alts]
+        if alts:
+            return [i != self.ref and len(i) == len(self.ref) for i in alts]
+        return [False]
 
     def has_insertion(self, individual=0):
         """Returns a boolean list of insertion status, ordered by samples"""
         alts = self.get_alt(individual=individual)
-        return [i != self.ref and len(i) > len(self.ref) for i in alts]
+        if alts:
+            return [i != self.ref and len(i) > len(self.ref) for i in alts]
+        return [False]
 
     def has_deletion(self, individual=0):
         """Returns a boolean list of deletion status, ordered by samples"""
