@@ -44,8 +44,6 @@ def main():
     individual = args.individual-1
     fasta_file = fasta.FastaIterator(args.fasta)
     splice_variants = args.splice_partial
-    if args.vcf:
-        vcf_file = gp.VCFIterator(args.vcf)
     id_tag = args.group_on
     if args.cufflinks:
         gff = gp.GFFReader(args.gff, preset='cufflinks')
@@ -75,11 +73,26 @@ def main():
                     overlapping_variants.sort(key=operator.itemgetter(0), reverse=True)
                     to_remove = []
                     for position, vcf_entry in overlapping_variants:
-                        if ((snps and not vcf_entry.has_snp(individual=individual)) and
-                            (dels and not vcf_entry.has_deletion(individual=individual)) and
-                            (ins and not vcf_entry.has_insertion(individual=individual))):
-                                to_remove.append(vcf_entry)
-                                continue
+                        checked = False
+                        valid_variant = False
+                        if homs:
+                            if vcf_entry.is_homozygous()[individual]:
+                                if ((snps and not vcf_entry.has_snp(individual=individual)) and
+                                    (dels and not vcf_entry.has_deletion(individual=individual)) and
+                                    (ins and not vcf_entry.has_insertion(individual=individual))):
+                                        continue
+                                valid_variant = True
+                        if hets:
+                            if vcf_entry.is_heterozygous()[individual]:
+                                if ((not valid_variant and not checked) and
+                                    (snps and not vcf_entry.has_snp(individual=individual)) and
+                                    (dels and not vcf_entry.has_deletion(individual=individual)) and
+                                    (ins and not vcf_entry.has_insertion(individual=individual))):
+                                        continue
+                                valid_variant = True
+                        if not valid_variant:
+                            to_remove.append(vcf_entry)
+                            continue
                         position -= gff_object.start
                         ref = vcf_entry.ref
                         lref = len(ref)
@@ -94,6 +107,7 @@ def main():
                         else:
                             continue
                         tseq[position:position+lref] = list(alt)
+                    vcf.remove_variants(to_remove)
                     seq.append(''.join(tseq))
                 seq.reverse()
                 seq = ''.join(seq)
@@ -102,7 +116,7 @@ def main():
                 seq = ''.join([fasta_file.get_sequence(gff_object.seqid, gff_object.start, gff_object.end) for gff_object, _ in gff_objects])
             if gff_object.strand == '-':
                 seq = fasta._reverse_complement(seq)
-            o.write('>%s\n%s\n' % (feature_name, seq))
+            #o.write('>%s\n%s\n' % (feature_name, seq))
 
 if __name__ == "__main__":
     sys.exit(main())

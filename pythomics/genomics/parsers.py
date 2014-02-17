@@ -243,6 +243,7 @@ class VCFReader(templates.GenericIterator):
         """
         super(VCFReader, self).__init__(filename)
         self.positions = {}
+        self.append_chromosome = append_chromosome
         for vcf_entry in VCFIterator(filename):
             chrom, start = vcf_entry.chrom, vcf_entry.pos
             if append_chromosome:
@@ -279,3 +280,13 @@ class VCFReader(templates.GenericIterator):
             return [vcf_entry for vcf_start, vcf_end in d
                     for vcf_entry in d[(vcf_start, vcf_end)]
                     if (vcf_start <= start and vcf_end >= end)]
+
+    def remove_variants(self, variants):
+        """Remove a list of variants from the positions we are scanning"""
+        chroms = set([i.chrom for i in variants])
+        for chrom in chroms:
+            if self.append_chromosome:
+                chrom = 'chr%s' % chrom
+            to_delete = [pos for pos in self.positions[chrom] if pos in variants]
+            for pos in to_delete:
+                del self.positions[chrom][pos]
