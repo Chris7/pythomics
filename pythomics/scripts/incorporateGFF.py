@@ -30,6 +30,7 @@ vcf_group.add_argument('--dels', help="Use Deletions.", action='store_true', def
 vcf_group.add_argument('--ins', help="Use Insertions.", action='store_true', default=False)
 vcf_group.add_argument('--individual', help="The Individual to use.", type=int, default=1)
 vcf_group.add_argument('--append-chromosome', help="Should 'chr' be appended to the chromosome column?.", action='store_true', default=False)
+vcf_group.add_argument('--variants-only', help="Only output transcripts with variants.", action='store_true', default=False)
 splice_group = parser.add_argument_group('Splice Junction Options (if a variant falls over a exon-exon junction. Default is to ignore.)')
 splice_group.add_argument('--splice-partial', help="Partially splice variants (only include exonic portions of variant)", action='store_true', default=False)
 
@@ -45,6 +46,7 @@ def main():
     fasta_file = fasta.FastaIterator(args.fasta)
     splice_variants = args.splice_partial
     id_tag = args.group_on
+    vars_only = args.variants_only
     if args.cufflinks:
         gff = gp.GFFReader(args.gff, preset='cufflinks')
     else:
@@ -54,21 +56,27 @@ def main():
         vcf = gp.VCFReader(args.vcf, append_chromosome=args.append_chromosome)
     with args.out as o:
         for feature_name, feature in gff.feature_map.iteritems():
+            header = feature_name
             if args.cufflinks:
                 gff_objects = [(gff_object, gff_object.start) for gff_object in feature.parts() if gff_object.feature_type != 'transcript']
             else:
                 gff_objects = [(gff_object, gff_object.start) for gff_object in feature.parts()]
             if not gff_objects:
                 continue
+            found_variant = False
             if vcf:
                 #for vcf, we want to sort from the end to the start so we can incorporate variants without having to
                 #worry about an offset
                 gff_objects.sort(key=operator.itemgetter(1), reverse=True)
                 seq = []
+                variant_info = []
                 for gff_object, _ in gff_objects:
                     tseq = list(fasta_file.get_sequence(gff_object.seqid, gff_object.start, gff_object.end))
                     overlapping_variants = [(int(entry.pos), entry) for entry in
                                             vcf.contains(gff_object.seqid, gff_object.start, gff_object.end)]
+                    if not found_variant and overlapping_variants:
+                        found_variant = True
+                        header += "\t"
                     #sort our variants from end to start as well
                     overlapping_variants.sort(key=operator.itemgetter(0), reverse=True)
                     to_remove = []
@@ -106,9 +114,11 @@ def main():
                             alt = max(vcf_entry.get_alt(individual=individual))
                         else:
                             continue
+                        variant_info.append('%s %s %s->%s' % (vcf_entry.chrom, vcf_entry.pos, ref, alt))
                         tseq[position:position+lref] = list(alt)
                     vcf.remove_variants(to_remove)
                     seq.append(''.join(tseq))
+                header += ';'.join(variant_info)
                 seq.reverse()
                 seq = ''.join(seq)
             else:
@@ -116,7 +126,8 @@ def main():
                 seq = ''.join([fasta_file.get_sequence(gff_object.seqid, gff_object.start, gff_object.end) for gff_object, _ in gff_objects])
             if gff_object.strand == '-':
                 seq = fasta._reverse_complement(seq)
-            o.write('>%s\n%s\n' % (feature_name, seq))
+            if not vars_only or (vars_only and found_variant):
+                o.write('>%s\n%s\n' % (header, seq))
 
 if __name__ == "__main__":
     sys.exit(main())
