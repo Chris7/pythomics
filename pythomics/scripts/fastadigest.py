@@ -18,7 +18,7 @@ parser.add_argument('-f', '--file', nargs='?', help="The fasta file to cleave.",
 parser.add_argument('-o', '--out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=sys.stdout)
 parser.add_argument('-t', '--type', help="The type of fasta file (default protein).", choices=['prot','nt'], type=str, default='prot')
 parser.add_argument('--frame', help="If using a nucleotide file, translate in how many frames?", choices=[1,3,6], type=int)
-parser.add_argument('--genome', help="Are we translating a genome? This will keep chromosome positions in the header.", action='store_true',, default=False)
+parser.add_argument('--genome', help="Are we translating a genome? This will keep chromosome positions in the header.", action='store_true', default=False)
 parser.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
 parser.add_argument('--max', help="Maximum cleavage length", type=int, default=30)
 parser.add_argument('--unique', help="Only return unique peptides per cleavage", action='store_true', default=False)
