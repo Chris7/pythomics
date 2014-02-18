@@ -1,4 +1,4 @@
-import os, re
+import os, re, sys
 import pythomics.templates as templates, config
 
 def _reverse_complement(seq):
@@ -98,7 +98,8 @@ class FastaIterator(templates.GenericIterator):
             try:
                 divisor = int(self.sequence_index[chrom][2])
             except KeyError:
-                raise KeyError("%s cannot be found within the fasta index file." % chrom)
+                sys.stderr.write("%s cannot be found within the fasta index file.\n" % chrom)
+                return ""
         start+=indexing[0]
         end+=indexing[1]
         #is it a valid position?
