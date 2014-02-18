@@ -20,6 +20,7 @@ parser.add_argument('-o', '--out', nargs='?', help="The file to write resulting 
 gff_group = parser.add_argument_group('GFF file related options')
 gff_group.add_argument('--gff', help="The GFF file to use.", type=argparse.FileType('r'), required=True)
 gff_group.add_argument('--group-on', help="The key to group entries together by (such as transcript_id)", type=str, default='ID')
+gff_group.add_argument('--feature', help="The feature to use for fetching coordinates (such as CDS, does not apply with cufflinks flag).", type=str, default='')
 gff_group.add_argument('--cufflinks', help="If the gff file is in the standard cufflinks output", action='store_true', default=False)
 vcf_group = parser.add_argument_group('VCF file related options')
 vcf_group.add_argument('--vcf', help="The VCF file to use.", type=argparse.FileType('r'))
@@ -47,6 +48,7 @@ def main():
     splice_variants = args.splice_partial
     id_tag = args.group_on
     vars_only = args.variants_only
+    chosen_feature = args.feature
     if args.cufflinks:
         gff = gp.GFFReader(args.gff, preset='cufflinks')
     else:
@@ -58,12 +60,16 @@ def main():
         for feature_name, feature in gff.feature_map.iteritems():
             header = feature_name
             if args.cufflinks:
-                gff_objects = [(gff_object, gff_object.start) for gff_object in feature.parts() if gff_object.feature_type != 'transcript']
+                gff_objects = [(gff_object, gff_object.start) for gff_object in feature.parts()
+                               if gff_object.feature_type != 'transcript']
             else:
-                gff_objects = [(gff_object, gff_object.start) for gff_object in feature.parts()]
+                if chosen_feature:
+                    gff_objects = [(gff_object, gff_object.start) for gff_object in feature.parts()
+                                   if gff_object.feature_type == chosen_feature]
+                else:
+                    gff_objects = [(gff_object, gff_object.start) for gff_object in feature.parts()]
             if not gff_objects:
                 continue
-            found_variant = False
             if vcf:
                 #for vcf, we want to sort from the end to the start so we can incorporate variants without having to
                 #worry about an offset
@@ -74,9 +80,6 @@ def main():
                     tseq = list(fasta_file.get_sequence(gff_object.seqid, gff_object.start, gff_object.end))
                     overlapping_variants = [(int(entry.pos), entry) for entry in
                                             vcf.contains(gff_object.seqid, gff_object.start, gff_object.end)]
-                    if not found_variant and overlapping_variants:
-                        found_variant = True
-                        header += "\t"
                     #sort our variants from end to start as well
                     overlapping_variants.sort(key=operator.itemgetter(0), reverse=True)
                     to_remove = []
@@ -118,15 +121,17 @@ def main():
                         tseq[position:position+lref] = list(alt)
                     vcf.remove_variants(to_remove)
                     seq.append(''.join(tseq))
-                header += ';'.join(variant_info)
+                if variant_info:
+                    header += '\t%s' % ';'.join(variant_info)
                 seq.reverse()
                 seq = ''.join(seq)
             else:
                 gff_objects.sort(key=operator.itemgetter(1))
-                seq = ''.join([fasta_file.get_sequence(gff_object.seqid, gff_object.start, gff_object.end) for gff_object, _ in gff_objects])
+                seq = ''.join([fasta_file.get_sequence(gff_object.seqid, gff_object.start, gff_object.end)
+                               for gff_object, _ in gff_objects])
             if gff_object.strand == '-':
                 seq = fasta._reverse_complement(seq)
-            if not vars_only or (vars_only and found_variant):
+            if not vars_only or (vars_only and variant_info):
                 o.write('>%s\n%s\n' % (header, seq))
 
 if __name__ == "__main__":
