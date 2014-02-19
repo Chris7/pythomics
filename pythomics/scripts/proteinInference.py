@@ -21,9 +21,9 @@ parser.add_argument('-d', '--delimiter', help="The delimiter for fields.", type=
 parser.add_argument('-c', '--col', help="The column with peptides (default: 1).", type=int, default=1)
 parser.add_argument('--header', help="The number of headers lines (default: 1).", type=int, default=1)
 parser.add_argument('-r', '--regex', help="A perl regular expression determining which parts of the header to capture.", type=str)
-parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", type=str)
+parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_false', default=False)
 group = parser.add_argument_group('iBAQ related options')
-group.add_argument('--ibaq', help="Provide to append iBAQ values as well.", action='store_true', default=False)
+group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true', default=False)
 group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", type=int, default=None)
 group.add_argument('--enzyme', help="The enzyme to cleave with.", choices=config.ENZYMES.keys(), type=str, default='trypsin')
 group.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
@@ -45,8 +45,8 @@ def main():
     normalize = args.no_normalize
     ibaq = args.ibaq
     case_sens = args.case_sensitive
+    precursor_columns = [int(i) for i in args.precursors.split(',')] if args.precursors else None
     if ibaq:
-        precursor_columns = [int(i) for i in args.precursors.split(',')] if args.precursors else None
         enzyme = digest.Enzyme( enzyme=args.enzyme )
     fasta_headers, protein_sequences = zip(*[(header, sequence) for header, sequence in fasta_file])
     #replace headers with parsed ones
@@ -75,27 +75,26 @@ def main():
             reader = csv.reader(f, delimiter=delimiter)
             for line_num, entry in enumerate(reader):
                 if line_num < header_lines:#we assume the first header line is the one we care about
-                    if ibaq:
-                        if not precursor_columns:
+                    if not precursor_columns:
                             precursor_columns = [i for i, v in enumerate(entry) if 'precursor' in v.lower()]
+                    if ibaq:
                         if normalize:
                             normalizations = [0 for i in precursor_columns]
                 else:
                     peptide = entry[peptide_column]
                     if not case_sens:
                         peptide = peptide.upper()
-                    if ibaq:
-                        for n_i, e_i in enumerate(precursor_columns):
-                            if entry[e_i]:
-                                intensity = decimal.Decimal(entry[e_i])
-                                try:
-                                    peptide_history[peptide][n_i].add(intensity)
-                                except KeyError:
-                                    peptide_history[peptide] = {}
-                                    for i in xrange(len(precursor_columns)):
-                                        peptide_history[peptide][i] = set([])
-                                    peptide_history[peptide][n_i].add(intensity)
-        if normalize:
+                    for n_i, e_i in enumerate(precursor_columns):
+                        if entry[e_i]:
+                            intensity = decimal.Decimal(entry[e_i])
+                            try:
+                                peptide_history[peptide][n_i].add(intensity)
+                            except KeyError:
+                                peptide_history[peptide] = {}
+                                for i in xrange(len(precursor_columns)):
+                                    peptide_history[peptide][i] = set([])
+                                peptide_history[peptide][n_i].add(intensity)
+        if ibaq and normalize:
             for peptide in peptide_history:
                 for i, v in peptide_history[peptide].iteritems():
                     normalizations[i] += sum(v)
