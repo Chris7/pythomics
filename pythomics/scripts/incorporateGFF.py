@@ -131,7 +131,7 @@ def main():
                                for gff_object, _ in gff_objects])
             if gff_object.strand == '-':
                 seq = fasta._reverse_complement(seq)
-            if not vars_only or (vars_only and variant_info):
+            if seq and not vars_only or (vars_only and variant_info):
                 o.write('>%s\n%s\n' % (header, seq))
 
 if __name__ == "__main__":
