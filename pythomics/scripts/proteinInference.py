@@ -114,10 +114,12 @@ def main():
                 sites = [match.start() for match in re.finditer(peptide, protein_sequences)]
                 indices = [protein_sequences.count('\n', 0, match_position) for match_position in sites]
             if inference:
-                matches = ';'.join([fasta_headers[i] for i in indices])
-                if not unique or len(indices) == 1:
-                    for i in indices:
-                        protein = fasta_headers[i]
+                proteins = [fasta_headers[i] for i in indices]
+                matches = ';'.join(proteins)
+                if unique:
+                    proteins = list(set(proteins))
+                if not unique or len(proteins) == 1:
+                    for protein in proteins:
                         try:
                             protein_grouping[protein][peptide] = d
                         except KeyError:
