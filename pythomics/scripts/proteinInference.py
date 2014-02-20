@@ -31,6 +31,8 @@ group.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
 group.add_argument('--max', help="Maximum cleavage length", type=int, default=30)
 group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensity", action='store_false', default=True)
 group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie group modifications)", action='store_true', default=False)
+protein_group = parser.add_argument_group('Protein Grouping Options')
+protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true', default=False)
 
 def main():
     args = parser.parse_args()
@@ -46,6 +48,7 @@ def main():
     normalize = args.no_normalize
     ibaq = args.ibaq
     case_sens = args.case_sensitive
+    unique = args.unique_only
     precursor_columns = [int(i) for i in args.precursors.split(',')] if args.precursors else None
     if ibaq:
         enzyme = digest.Enzyme( enzyme=args.enzyme )
@@ -112,12 +115,13 @@ def main():
                 indices = [protein_sequences.count('\n', 0, match_position) for match_position in sites]
             if inference:
                 matches = ';'.join([fasta_headers[i] for i in indices])
-                for i in indices:
-                    protein = fasta_headers[i]
-                    try:
-                        protein_grouping[protein][peptide] = d
-                    except KeyError:
-                        protein_grouping[protein] = {peptide: d}
+                if not unique or len(indices) == 1:
+                    for i in indices:
+                        protein = fasta_headers[i]
+                        try:
+                            protein_grouping[protein][peptide] = d
+                        except KeyError:
+                            protein_grouping[protein] = {peptide: d}
                 entry.append(matches)
             if ibaq:
                 ibaqs = []
