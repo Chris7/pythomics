@@ -15,7 +15,8 @@ import pythomics.parsers.fasta as fasta
 
 parser = argparse.ArgumentParser(description = description)
 parser.add_argument('-f', '--fasta', nargs='?', help="The fasta file to cleave.", type=argparse.FileType('r'), default=sys.stdin)
-parser.add_argument('-o', '--out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=sys.stdout)
+parser.add_argument('--peptide_out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=sys.stdout)
+parser.add_argument('--protein_out', nargs='?', help="The file to write grouped products to.", type=argparse.FileType('w'), default=sys.stdout)
 parser.add_argument('-t', '--tsv', help="The tab separated file.", type=argparse.FileType('r'), required=True)
 parser.add_argument('-d', '--delimiter', help="The delimiter for fields.", type=str, default='\t')
 parser.add_argument('-c', '--col', help="The column with peptides (default: 1).", type=int, default=1)
@@ -61,7 +62,37 @@ def main():
         cleaved = {}
     protein_sequences = '\n'.join(protein_sequences)
     peptide_history = {}
-    with args.out as o:
+    with tsv_file as f:
+        reader = csv.reader(f, delimiter=delimiter)
+        for line_num, entry in enumerate(reader):
+            if line_num < header_lines:#we assume the first header line is the one we care about
+                if not precursor_columns:
+                        precursor_columns = [i for i, v in enumerate(entry) if 'precursor' in v.lower()]
+                if ibaq:
+                    if normalize:
+                        normalizations = [0 for i in precursor_columns]
+            else:
+                peptide = entry[peptide_column]
+                if not case_sens:
+                    peptide = peptide.upper()
+                for n_i, e_i in enumerate(precursor_columns):
+                    if entry[e_i]:
+                        intensity = decimal.Decimal(entry[e_i])
+                        try:
+                            peptide_history[peptide][n_i].add(intensity)
+                        except KeyError:
+                            peptide_history[peptide] = {}
+                            for i in xrange(len(precursor_columns)):
+                                peptide_history[peptide][i] = set([])
+                            peptide_history[peptide][n_i].add(intensity)
+        if ibaq and normalize:
+            for peptide in peptide_history:
+                for i, v in peptide_history[peptide].iteritems():
+                    normalizations[i] += sum(v)
+        else:
+            normalizations = [1 for peptide in peptide_history for intensities in peptide_history[peptide]]
+    protein_grouping = {}
+    with args.peptide_out as o:
         writer = csv.writer(o, delimiter=delimiter)
         header = ['Peptide', 'PSMS', 'Total Precursor Area']
         if inference:
@@ -71,35 +102,6 @@ def main():
                 header.append('Normalized Precursor Intensity')
             header.append('iBAQ')
         writer.writerow(header)
-        with tsv_file as f:
-            reader = csv.reader(f, delimiter=delimiter)
-            for line_num, entry in enumerate(reader):
-                if line_num < header_lines:#we assume the first header line is the one we care about
-                    if not precursor_columns:
-                            precursor_columns = [i for i, v in enumerate(entry) if 'precursor' in v.lower()]
-                    if ibaq:
-                        if normalize:
-                            normalizations = [0 for i in precursor_columns]
-                else:
-                    peptide = entry[peptide_column]
-                    if not case_sens:
-                        peptide = peptide.upper()
-                    for n_i, e_i in enumerate(precursor_columns):
-                        if entry[e_i]:
-                            intensity = decimal.Decimal(entry[e_i])
-                            try:
-                                peptide_history[peptide][n_i].add(intensity)
-                            except KeyError:
-                                peptide_history[peptide] = {}
-                                for i in xrange(len(precursor_columns)):
-                                    peptide_history[peptide][i] = set([])
-                                peptide_history[peptide][n_i].add(intensity)
-        if ibaq and normalize:
-            for peptide in peptide_history:
-                for i, v in peptide_history[peptide].iteritems():
-                    normalizations[i] += sum(v)
-        else:
-            normalizations = [1 for peptide in peptide_history for intensities in peptide_history[peptide]]
         for index, (peptide, d) in enumerate(peptide_history.iteritems()):
             if not index%1000:
                 sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
@@ -110,6 +112,12 @@ def main():
                 indices = [protein_sequences.count('\n', 0, match_position) for match_position in sites]
             if inference:
                 matches = ';'.join([fasta_headers[i] for i in indices])
+                for i in indices:
+                    protein = fasta_headers[i]
+                    try:
+                        protein_grouping[protein][peptide] = d
+                    except KeyError:
+                        protein_grouping[protein] = {peptide: d}
                 entry.append(matches)
             if ibaq:
                 ibaqs = []
@@ -128,6 +136,38 @@ def main():
                     ibaqs.append(precursor_int/peptides)
                 entry.append(';'.join(str(i) for i in ibaqs))
             writer.writerow(entry)
+    if inference:
+        with args.protein_out as o:
+            writer = csv.writer(o, delimiter=delimiter)
+            header = ['Protein', 'Peptides', 'Total Precursor Area']
+            if ibaq:
+                if normalize:
+                    header.append('Normalized Precursor Intensity')
+                header.append('iBAQ')
+            writer.writerow(header)
+            for protein in protein_grouping:
+                entry = [protein]
+                intensities = []
+                precursor_int = 0
+                peptide_psm_count = []
+                for peptide in protein_grouping[protein]:
+                    d = protein_grouping[protein][peptide]
+                    peptide_psm_count.append((peptide,sum([len(d[i]) for i in d])))
+                    intensities += [sum(d[i]) for i in d]
+                    if normalize:
+                        precursor_int += sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                entry.append(';'.join(['%s(%s)' % (i,j) for i,j in peptide_psm_count]))
+                entry.append(sum(intensities))
+                if ibaq:
+                    if normalize:
+                        entry.append(precursor_int)
+                    peptides = cleaved.get(protein_index,None)
+                    if peptides:
+                        entry.append(precursor_int/peptides)
+                    else:
+                        entry.append('NA')
+                writer.writerow(entry)
+
 
 if __name__ == "__main__":
     sys.exit(main())
