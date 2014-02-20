@@ -160,7 +160,7 @@ def main():
                     d = protein_grouping[protein][peptide]
                     peptide_psm_count.append((peptide,sum([len(d[i]) for i in d])))
                     intensities += [sum(d[i]) for i in d]
-                    if normalize:
+                    if ibaq and normalize:
                         precursor_int += sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
                 entry.append(';'.join(['%s(%s)' % (i,j) for i,j in peptide_psm_count]))
                 entry.append(sum(intensities))
