@@ -8,24 +8,22 @@ digesting fasta files, it is possible to create 6 frame as well as
 """
 
 import argparse, sys, itertools
-import pythomics.proteomics.config as config
+from pythomics.templates import CustomParser
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
 
-parser = argparse.ArgumentParser(description = description)
-parser.add_argument('--enzyme', help="The enzyme to cleave with.", choices=config.ENZYMES.keys(), type=str, default='trypsin')
-parser.add_argument('-f', '--file', nargs='?', help="The fasta file to cleave.", type=argparse.FileType('r'), default=sys.stdin)
-parser.add_argument('-o', '--out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=sys.stdout)
+parser = CustomParser(description = description)
+parser.add_fasta()
 parser.add_argument('-t', '--type', help="The type of fasta file (default protein).", choices=['prot','nt'], type=str, default='prot')
 parser.add_argument('--frame', help="If using a nucleotide file, translate in how many frames?", choices=[1,3,6], type=int)
 parser.add_argument('--genome', help="Are we translating a genome? This will keep chromosome positions in the header.", action='store_true', default=False)
-parser.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
-parser.add_argument('--max', help="Maximum cleavage length", type=int, default=30)
+parser.add_out()
+parser.add_enzyme()
 parser.add_argument('--unique', help="Only return unique peptides per cleavage", action='store_true', default=False)
 
 def main():
     args = parser.parse_args()
-    file_name = args.file
+    file_name = args.fasta
     enzyme_choice = args.enzyme
     digest_type = args.type
     digest_frame = args.frame
@@ -43,10 +41,10 @@ def main():
         regex = re.compile(r'([\*])')
         digest_type = 'nt'
     if digest_type == 'prot' and digest_frame:
-        print "Protein digestions cannot have a frame."
+        sys.stderr.write("Protein digestions cannot have a frame.\n")
         return 1
     if digest_type == 'nt' and not digest_frame:
-        print "Nucleotide digestions must specify the frame."
+        sys.stderr.write("Nucleotide digestions must specify the frame.\n")
         return 1
     fasta_file = fasta.FastaIterator(file_name)
     enzyme = digest.Enzyme( enzyme=enzyme_choice )

@@ -8,13 +8,13 @@ sequence is divided by stop codons. This is prevent ambiguity with
 differing minimum lengths of ORFs.
 """
 
-import argparse
-import sys
+from pythomics.templates import CustomParser
+import sys, argparse
 import pythomics.parsers.fasta as fasta
 
-parser = argparse.ArgumentParser(description = description, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('-f', '--fasta', nargs='?', help="The fasta file to cleave.", type=argparse.FileType('r'), default=sys.stdin)
-parser.add_argument('-o', '--out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=sys.stdout)
+parser = CustomParser(description = description, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_fasta()
+parser.add_out()
 parser.add_argument('--min', help="Minimum ORF length in amino acids.", type=int, default=50)
 parser.add_argument('--both-strands', help="Search both strands for ORFs.", action='store_true', default=False)
 

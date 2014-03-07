@@ -2,7 +2,8 @@
 
 __author__ = 'Chris Mitchell'
 
-import argparse, sys
+import sys
+from pythomics.templates import CustomParser
 import pythomics.parsers.fasta as fasta
 import pythomics.genomics.parsers as gp
 
@@ -11,17 +12,10 @@ This script will incorporate the variants in a given VCF file into a specified
 fasta file.
 """
 
-parser = argparse.ArgumentParser(description = description)
-parser.add_argument('--vcf', help="The VCF file to use.", type=argparse.FileType('r'), default=sys.stdin)
-parser.add_argument('-f', '--file', nargs='?', help="The fasta file to incorporate changes into.", type=argparse.FileType('r'), default=sys.stdin)
-parser.add_argument('-o', '--out', nargs='?', help="The file to write resulting fasta file to.", type=argparse.FileType('w'), default=sys.stdout)
-parser.add_argument('--no-homozygous', help="Don't include homozygous variants (default to include)", action='store_false', default=False)
-parser.add_argument('--heterozygous', help="Use heterozygous variants", action='store_true', default=False)
-parser.add_argument('--no-snps', help="Don't use SNPs (default to true).", action='store_false', default=False)
-parser.add_argument('--dels', help="Use Deletions.", action='store_true', default=False)
-parser.add_argument('--ins', help="Use Insertions.", action='store_true', default=False)
-parser.add_argument('--individual', help="The Individual to use.", type=int, default=1)
-parser.add_argument('--append-chromosome', help="Should 'chr' be appended to the chromosome column?.", action='store_true', default=False)
+parser = CustomParser(description = description)
+parser.add_fasta(help="The fasta file to incorporate changes into.")
+parser.add_out(help="The file to write resulting fasta file to.")
+parser.add_vcf()
 
 def main():
     args = parser.parse_args()

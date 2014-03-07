@@ -9,28 +9,24 @@ use this annotation to include iBAQ measures.
 """
 
 import argparse, sys, re, csv, copy, decimal
+from pythomics.templates import CustomParser
 import pythomics.proteomics.config as config
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
 
-parser = argparse.ArgumentParser(description = description)
-parser.add_argument('-f', '--fasta', nargs='?', help="The fasta file to cleave.", type=argparse.FileType('r'), default=sys.stdin)
+parser = CustomParser(description = description)
+parser.add_fasta(help="The fasta file to match peptides against.")
 parser.add_argument('--peptide_out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=sys.stdout)
 parser.add_argument('--protein_out', nargs='?', help="The file to write grouped products to.", type=argparse.FileType('w'), default=sys.stdout)
-parser.add_argument('-t', '--tsv', help="The tab separated file.", type=argparse.FileType('r'), required=True)
-parser.add_argument('-d', '--delimiter', help="The delimiter for fields.", type=str, default='\t')
-parser.add_argument('-c', '--col', help="The column with peptides (default: 1).", type=int, default=1)
-parser.add_argument('--header', help="The number of headers lines (default: 1).", type=int, default=1)
+parser.add_delimited_file()
 parser.add_argument('-r', '--regex', help="A perl regular expression determining which parts of the header to capture.", type=str)
 parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_false', default=False)
 group = parser.add_argument_group('iBAQ related options')
 group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true', default=False)
 group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", type=int, default=None)
-group.add_argument('--enzyme', help="The enzyme to cleave with.", choices=config.ENZYMES.keys(), type=str, default='trypsin')
-group.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
-group.add_argument('--max', help="Maximum cleavage length", type=int, default=30)
+parser.add_enzyme()
 group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensity", action='store_false', default=True)
-group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie group modifications)", action='store_true', default=False)
+group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true', default=False)
 protein_group = parser.add_argument_group('Protein Grouping Options')
 protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true', default=False)
 
