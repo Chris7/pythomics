@@ -12,5 +12,5 @@ setup(name='pythomics',
       scripts=['pythomics/scripts/fastadigest.py', 'pythomics/scripts/fastadigeststats.py',
                'pythomics/scripts/incorporateVCF.py', 'pythomics/scripts/fetchOrfs.py',
                'pythomics/scripts/incorporateGFF.py', 'pythomics/scripts/proteinInference.py',
-               'pythonics/scripts/featureCollapser.py',],
+               'pythomics/scripts/featureCollapser.py',],
       zip_safe=False)
