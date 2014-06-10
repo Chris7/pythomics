@@ -29,6 +29,7 @@ group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensi
 group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true', default=False)
 protein_group = parser.add_argument_group('Protein Grouping Options')
 protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true', default=False)
+protein_group.add_argument('--position', help="Write the position of the peptide matches.", action='store_true', default=False)
 
 def main():
     args = parser.parse_args()
@@ -45,6 +46,7 @@ def main():
     ibaq = args.ibaq
     case_sens = args.case_sensitive
     unique = args.unique_only
+    out_position = args.position
     precursor_columns = [int(i) for i in args.precursors.split(',')] if args.precursors else None
     if ibaq:
         enzyme = digest.Enzyme( enzyme=args.enzyme )
@@ -100,6 +102,8 @@ def main():
             if normalize:
                 header.append('Normalized Precursor Intensity')
             header.append('iBAQ')
+        if out_position:
+            header.append('Peptide Protein Position')
         writer.writerow(header)
         for index, (peptide, d) in enumerate(peptide_history.iteritems()):
             if not index%1000:
@@ -108,14 +112,17 @@ def main():
             entry = [peptide, sum([len(d[i]) for i in d]), precursor_int]
             if inference or ibaq:
                 sites = [match.start() for match in re.finditer(peptide, protein_sequences)]
-                indices = [protein_sequences.count('\n', 0, match_position) for match_position in sites]
+                if out_position:
+                     indices = [(protein_sequences.count('\n', 0, match_position), match_position-protein_sequences[:match_position].rfind('\n')) for match_position in sites]
+                else:
+                     indices = [(protein_sequences.count('\n', 0, match_position), 0) for match_position in sites]
             if inference:
-                proteins = [fasta_headers[i] for i in indices]
+                proteins = [fasta_headers[i[0]] for i in indices]
                 matches = ';'.join(proteins)
                 if unique:
                     proteins = list(set(proteins))
                 if not unique or len(proteins) == 1:
-                    for protein in proteins:
+                    for protein_index, protein in enumerate(proteins):
                         try:
                             protein_grouping[protein][peptide] = d
                         except KeyError:
@@ -137,6 +144,8 @@ def main():
                         continue
                     ibaqs.append(precursor_int/peptides)
                 entry.append(';'.join(str(i) for i in ibaqs))
+            if out_position:
+                entry.append(','.join(str(i[1]) for i in indices))
             writer.writerow(entry)
     if inference:
         with args.protein_out as o:
