@@ -629,7 +629,7 @@ class MascotDATIterator(templates.GenericIterator):
         modind=1
         mod = self.resfile.getSectionValueStr(msparser.ms_mascotresfile.SEC_MASSES, "delta%d"%modind)
         while mod:
-            print mod
+            # print mod
             modind+=1
             mod = self.resfile.getSectionValueStr(msparser.ms_mascotresfile.SEC_MASSES, "delta%d"%modind)
         self.aahelper = msparser.ms_aahelper(self.resfile, "enzymes.txt")
@@ -866,7 +866,7 @@ class ThermoMSFIterator(templates.GenericIterator):
             scanObj = PeptideObject()
             try:
                 mods = self.mods[int(pepId)]
-                print mods
+                # print mods
                 for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
                     modEntry = self.modTable[int(modId)]
                     scanObj.addModification(sequence[int(modPosition)], modPosition, modEntry[1], modEntry[0])
@@ -907,7 +907,7 @@ class ThermoMSFIterator(templates.GenericIterator):
             #sIO = StringIO.StringIO('\n'.join(msStr[1:]))
             stage = 0
             #this is dirty, but unfortunately the fastest method at the moment
-            print msInfo
+            # print msInfo
             for row in msStr:
                 if stage == 0:
                     if 'FileID' in row:
@@ -940,7 +940,7 @@ class ThermoMSFIterator(templates.GenericIterator):
                     elif '</PeakCentroids>' in row:
                         break
         if msInfo:
-	    print scanObj.scans
+	    # print scanObj.scans
             return scanObj
         else:
             return None
