@@ -40,13 +40,13 @@ class CustomParser(argparse.ArgumentParser):
 
 
     def add_fasta(self, help="The fasta file to operate on."):
-        self.add_argument('-f', '--fasta', nargs='?', help=help, type=argparse.FileType('r'), default=sys.stdin)
+        self.add_argument('-f', '--fasta', nargs='?', help=help, type=argparse.FileType('r'))
 
     def add_out(self, help='The file to write results to. Leave blank for stdout,'):
         self.add_argument('-o', '--out', nargs='?', help=help, type=argparse.FileType('w'), default=sys.stdout)
 
     def add_vcf(self, help="The VCF file to use."):
-        self.add_argument('--vcf', help=help, type=argparse.FileType('r'), default=sys.stdin)
+        self.add_argument('--vcf', help=help, type=argparse.FileType('r'))
         self.add_argument('--no-homozygous', help="Don't include homozygous variants (default to include)", action='store_false', default=False)
         self.add_argument('--heterozygous', help="Use heterozygous variants", action='store_true', default=False)
         self.add_argument('--no-snps', help="Don't use SNPs (default to true).", action='store_false', default=False)

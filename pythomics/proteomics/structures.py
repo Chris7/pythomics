@@ -18,6 +18,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 __author__ = 'chris'
 from pythomics.proteomics import config
 
+class Chromatogram(object):
+    pass
+
+
 class ScanObject(object):
     """
     A scan object to store peaklist information in.
@@ -27,7 +31,7 @@ class ScanObject(object):
     def __init__(self):
         self.scans = []
         self.rt = ''
-        pass
+        self.ms_level = None
 
     def writeScan(self, o):
         o.write('BEGIN IONS\n')

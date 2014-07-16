@@ -23,13 +23,14 @@ parser.add_argument('-r', '--regex', help="A perl regular expression determining
 parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_false', default=False)
 group = parser.add_argument_group('iBAQ related options')
 group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true', default=False)
-group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", type=int, default=None)
+group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", default=None)
 parser.add_enzyme()
 group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensity", action='store_false', default=True)
 group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true', default=False)
 protein_group = parser.add_argument_group('Protein Grouping Options')
 protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true', default=False)
 protein_group.add_argument('--position', help="Write the position of the peptide matches.", action='store_true', default=False)
+
 
 def main():
     args = parser.parse_args()

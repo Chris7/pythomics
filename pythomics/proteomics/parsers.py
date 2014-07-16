@@ -20,7 +20,7 @@ __author__ = 'Chris Mitchell'
 import sys, copy, struct, base64, gzip
 from os import path
 import pythomics.templates as templates
-from pythomics.proteomics.structures import PeptideObject, ScanObject
+from pythomics.proteomics.structures import PeptideObject, ScanObject, Chromatogram
 from pythomics.proteomics import config
 import re, os, sqlite3, StringIO, zipfile, time
 try:
@@ -38,8 +38,15 @@ scanSplitter = re.compile(r'[\t\s]')
 distillerParse = re.compile(r'_DISTILLER_RAWFILE\[(\d+)\]=\(1\)(.+)')
 lastSplit = re.compile(r'.+[/\\](.+)')
 
+class GenericProteomicIterator(object):
+    """
+    Generics to be overridden
+    """
+    def getChromatogram(self):
+        pass
 
-class MZMLIterator(templates.GenericIterator):
+
+class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename):
         """An iterator over the mzML file format.
          I just need a parser right now so the specs might not be exactly correct
@@ -53,7 +60,7 @@ class MZMLIterator(templates.GenericIterator):
                 print 'gzip not supported'
                 dom1 = etree.parse(self.filename).findall('{http://psi.hupo.org/ms/mzml}spectrum')#, tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML'))
             else:
-                dom1 = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML'))
+                dom1 = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogramList'))
             self.lxml = True
         except NameError:
             self.lxml = False
@@ -108,6 +115,21 @@ class MZMLIterator(templates.GenericIterator):
             scanObj.title = dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
             scanObj.rt = float(rt)
             return scanObj
+        elif spectra.tag == '{0}chromatogramList'.format(namespace):
+            spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}chromatogram/{0}cvParam'.format(namespace))])
+            for info in spectra.findall('{0}chromatogram/{0}binaryDataArrayList/'.format(namespace)):
+                chroma_params = dict([(i.get('name'), i.get('value')) for i in info.findall('{0}cvParam'.format(namespace))])
+                if 'intensity array' in chroma_params:
+                    intensities = base64.b64decode(info.find('{0}binary'.format(namespace)).text)
+                    intensities = [struct.unpack('f', intensities[i:i+4])[0] for i in xrange(0,len(intensities),4)]
+                elif 'time array' in chroma_params:
+                    time_array = base64.b64decode(info.find('{0}binary'.format(namespace)).text)
+                    time_array = [struct.unpack('d', time_array[i:i+8])[0] for i in xrange(0,len(time_array),8)]
+            chromObj = Chromatogram()
+            chromObj.times = time_array
+            chromObj.intensities = intensities
+            self.chromatogram = chromObj
+            return None
         else:
             raise StopIteration
     
@@ -118,10 +140,14 @@ class MZMLIterator(templates.GenericIterator):
             raise StopIteration
         return self.parselxml(spectra[1])
 
-    def getScan(self, id):
+    def getChromatogram(self):
+        return self.chromatogram
+
+    def getScan(self, id, peptide=None):
         try:
             if isinstance(self.filename, gzip.GzipFile):
-                return self.parselxml(spectra, full=True, namespace='')
+                pass
+                # return self.parselxml(spectra, full=True, namespace='')
             else:
                 if not self.ra:
                     [i for i in self]
@@ -134,9 +160,10 @@ class MZMLIterator(templates.GenericIterator):
                 spectra = etree.fromstring(''.join(row))
             return self.parselxml(spectra, full=True, namespace='')
         except IndexError:
-            print 'wtf'
+            print 'mzml cannot find', id
+            return None
 
-class PepXMLIterator(templates.GenericIterator):
+class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename):
         """An iterator over the pepXML file format.
 
@@ -259,7 +286,7 @@ class PepXMLIterator(templates.GenericIterator):
                     pepObj.addModification(mod_aa, mod_pos, mod_info['mass'], mod_info['mass'])
             self.scans[title] = pepObj
             # get our mz/intensities
-            scanInfo = self.mzml.getScan(start_scan)
+            scanInfo = self.mzml.getScan(start_scan, peptide=peptide)
             pepObj.scans = scanInfo.scans
             return pepObj
         else:
@@ -272,13 +299,14 @@ class PepXMLIterator(templates.GenericIterator):
             raise StopIteration
         return self.parselxml(spectra[1])
 
-    def getScan(self, id):
+    def getScan(self, id, peptide=None):
         try:
             return self.scans[id]
         except IndexError:
-            print 'wtf'
+            print 'pepxml cannto find', id
+            return None
 
-class XTandemXML(templates.GenericIterator):
+class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
     """
     Parser for X!Tandem XML Files.
     """
@@ -373,16 +401,16 @@ class XTandemXML(templates.GenericIterator):
             raise StopIteration
         return self.parselxml(group)
 
-    def getScan(self, id):
+    def getScan(self, id, peptide=None):
         try:
             return self.scans[id]
         except IndexError:
-            print 'wtf'
+            return None
 
     def getProgress(self):
         return len(self.scans)*100/self.num
 
-class MGFIterator(templates.GenericIterator):
+class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename, **kwrds):
         super(MGFIterator, self).__init__(filename, **kwrds)
         #load our index
@@ -418,7 +446,7 @@ class MGFIterator(templates.GenericIterator):
                 f.write('%s\t%d\t%d\n'%(i,self.ra[i][0],self.ra[i][1]))
             self.f.seek(0)
 
-    def getScan(self, title):
+    def getScan(self, title, peptide=None):
         """
         allows random lookup
         """
@@ -440,6 +468,7 @@ class MGFIterator(templates.GenericIterator):
         foundMass = False
         foundTitle = False
         scanObj = ScanObject()
+        scanObj.ms_level = 2
 #        print 'stuff in scan',scan
         for row in scan.split('\n'):
             if not row:
@@ -505,7 +534,7 @@ class MGFIterator(templates.GenericIterator):
     def getProgress(self):
         return self.f.tell()*100/self.epos
 
-class MascotDATIterator(templates.GenericIterator):
+class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename):
         super(MascotDATIterator, self).__init__(filename)
         self.specParse = re.compile(r'Spectrum(\d+)')
@@ -668,10 +697,11 @@ class MascotDATIterator(templates.GenericIterator):
         self.hit+=1
         return self.parseScan(self.hit)
 
-    def getScan(self, title,hit,rank):
-        return self.scanMap[int(hit),int(rank)]
-#        scan = self.parseScan(int(hit),peprank=int(rank),full=True)
-#        return scan
+    def getScan(self, title, peptide=None):
+        try:
+            return self.scanMap[(title, peptide)]
+        except:
+            return None
 
     def parseScan(self, hit,full=True,peprank=False):
         prot = self.results.getHit(hit)
@@ -786,7 +816,7 @@ class MascotDATIterator(templates.GenericIterator):
 #                        print matched
                     specId = self.specParse.search(stitle).group(1)
                     scanObj.id = specId
-                    self.scanMap[hit,rank] = scanObj
+                    self.scanMap[(specId, peptide)] = scanObj
                     return scanObj
         else:
             del self.resfile
@@ -795,7 +825,7 @@ class MascotDATIterator(templates.GenericIterator):
             raise StopIteration
         return None
 
-class ThermoMSFIterator(templates.GenericIterator):
+class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename, clvl=3,srank=1):
         if isinstance(filename,(str,unicode)):
             self.f = open(filename, 'rb')
@@ -839,7 +869,34 @@ class ThermoMSFIterator(templates.GenericIterator):
             self.cur.execute(sql)
         self.index = 0
 
-    def getScan(self, title, specId, peptide):
+    def loadChromatogram(self):
+        sql = 'select * from chromatograms'
+        self.cur.execute(sql)
+        for chroma in self.cur.fetchall():
+            sInfo = chroma[2]
+            fp = StringIO.StringIO(sInfo)
+            zf = zipfile.ZipFile(fp, 'r')
+            for j in zf.namelist():
+                msInfo = zf.read(j)
+                xml = etree.fromstring(msInfo)
+                chromObj = Chromatogram()
+                chromObj.times, chromObj.intensities = zip(*[(float(point.attrib['T']), float(point.attrib['Y'])) for point in xml.findall('Points/*')])
+                if 'TicTrace' in j:
+                    self.chromatogram = chromObj
+                elif 'BasePeakTrace' in j:
+                    self.basetrace = chromObj
+            return self.chromatogram
+        else:
+            raise StopIteration
+
+    def getChromatogram(self):
+        try:
+            return self.chromatogram
+        except AttributeError:
+            self.loadChromatogram()
+        return self.chromatogram
+
+    def getScan(self, specId, peptide=None):
         """
         get a random scan
         """
@@ -930,9 +987,16 @@ class ThermoMSFIterator(templates.GenericIterator):
                         scanObj.mass = float(smass)
                         stage=2
                 elif stage == 2:
-                    if '<PeakCentroids>' in row:
+                    if '<IsotopeClusterPeakCentroids>' in row:
                         stage = 3
+                        scanObj.ms1_scans = []
                 elif stage == 3:
+                    if '<PeakCentroids>' in row:
+                        stage = 4
+                    elif '<Peak X' in row:
+                        finfo = row.split('"')
+                        scanObj.ms1_scans.append((float(finfo[1]),float(finfo[3])))
+                elif stage == 4:
                     #we just grab the ms/ms peaks at the moment
                     if 'Peak X' in row:
                         finfo = row.split('"')
@@ -958,79 +1022,3 @@ class ThermoMSFIterator(templates.GenericIterator):
 
     def getProgress(self):
         return self.index*100/self.nrows
-
-class indexFolder():
-    def __init__(self, folder):
-        for root,dirs,files in os.walk(folder):
-            for fileName in files:
-                if '.mgf' in fileName and '.mgfi' not in fileName:
-                    mgfIterator(os.path.join(root,fileName))
-
-class mgfParser(object):
-    def __init__(self, filename):
-        if type(filename) == type('string'):
-            self.f = open(filename)
-        else:
-            self.f = filename
-        self.scans = {}
-        newScan=False
-        distiller=False
-        setupScan = False
-        dmap = {}
-        dparse = re.compile(r'_DISTILLER_RAWFILE\[(\d+)\]=.+\\(.+)')
-        tparse = re.compile(r'TITLE=(\d+),(\d+): Scan (\d+) \(rt=(.+)\)')
-        for row in self.f:
-            if '_DISTILLER' in row:
-                distiller=True
-                m = dparse.match(row)
-                if m:
-                    fname = m.group(2)
-                    pos = fname.lower().find('.raw')
-                    if pos != -1:
-                        fname = fname[:pos]
-                    dmap[m.group(1)] = fname
-                else:
-                    continue
-            elif 'BEGIN IONS' in row:
-                scanObj = scanObject()
-                setupScan=True
-                newScan=True
-            elif 'END IONS' in row:
-                self.scans[title] = scanObj
-                newScan = False
-            elif setupScan:
-                entry = row.strip().split('=')
-                if len(entry) >= 2:
-                    if entry[0] == 'PEPMASS':
-                        scanObj.mass = float(entry[1])
-                    elif entry[0] == 'CHARGE':
-                        scanObj.charge = entry[1]
-                    elif entry[0] == 'TITLE':
-                        if distiller:
-                            m = tparse.match(row)
-#                            print '%s.%s.%s'%(dmap[int(m.group(1))-1],m.group(3),m.group(3))
-#                            print m, m.groups()
-                        else:
-                            title = entry[1]
-                            scanObj.title = entry[1]
-                else:
-                    row.strip()
-                    mz,inten = row.strip().split('\t')
-                    scanObj.scans.append((float(mz),float(inten)))
-                    setupScan=False
-            elif newScan and not setupScan:
-                mz,inten = row.strip().split('\t')
-                scanObj.scans.append((float(mz),float(inten)))
-        print 'parsed',len(self.scans)
-
-    def hasScan(self, scan):
-        return self.scans.has_key(scan)
-
-    def getScans(self):
-        return self.scans
-
-    def getScan(self, scan):
-        try:
-            return self.scans[scan]
-        except KeyError:
-            return None
