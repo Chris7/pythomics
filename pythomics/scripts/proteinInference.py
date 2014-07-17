@@ -127,8 +127,7 @@ def main():
                 sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
             precursor_int = float(sum([sum(d[i]) for i in d]))
             entry = [peptide, sum([len(d[i]) for i in d]), precursor_int]
-            peptide_dict = peptide_dict.get('inference', {})
-            if not peptide_dict:
+            if 'inference' not in peptide_dict:
                 peptide_dict['inference'] = {'proteins': False}
                 if inference or ibaq:
                     sites = [match.start() for match in re.finditer(peptide.upper(), protein_sequences)]
