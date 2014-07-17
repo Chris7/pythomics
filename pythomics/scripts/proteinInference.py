@@ -233,8 +233,6 @@ def main():
                     peptide = entry[peptide_column]
                     if not case_sens:
                         peptide = peptide.upper()
-                    if inference:
-                        entry.append()
                     d = peptide_grouping.get(peptide,False)
                     if d:
                         if inference:
