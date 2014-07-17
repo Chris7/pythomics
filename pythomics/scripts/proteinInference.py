@@ -16,20 +16,25 @@ import pythomics.parsers.fasta as fasta
 
 parser = CustomParser(description = description)
 parser.add_fasta(help="The fasta file to match peptides against.")
+parser.add_out(help="The name of the file you wish to create with results appended.")
 parser.add_argument('--peptide_out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=sys.stdout)
 parser.add_argument('--protein_out', nargs='?', help="The file to write grouped products to.", type=argparse.FileType('w'), default=sys.stdout)
 parser.add_delimited_file()
 parser.add_argument('-r', '--regex', help="A perl regular expression determining which parts of the header to capture.", type=str)
+parser.add_argument('--inferred-name', help="The name you want to assign for protein inference (in case you are regexing for gene names or something).", type=str, default='Proteins')
 parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_false', default=False)
 group = parser.add_argument_group('iBAQ related options')
 group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true', default=False)
 group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", default=None)
 parser.add_enzyme()
 group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensity", action='store_false', default=True)
-group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true', default=False)
 protein_group = parser.add_argument_group('Protein Grouping Options')
 protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true', default=False)
 protein_group.add_argument('--position', help="Write the position of the peptide matches.", action='store_true', default=False)
+protein_group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true', default=False)
+protein_group.add_argument('--modification-site', help="Write the position in the parent protein of the modification (requires case-sensitive and modifications being lower-cased).", action='store_true', default=False)
+
+
 
 
 def main():
@@ -37,15 +42,18 @@ def main():
     fasta_file = fasta.FastaIterator(args.fasta)
     peptide_column = args.col-1
     tsv_file = args.tsv
+    out_file = args.out
     header_lines = args.header
     delimiter = args.delimiter
     inference = not args.no_inference
+    inferred_name = args.inferred_name
     digest_min = args.min
     digest_max = args.max
     sys.stderr.write("Reading in Fasta file.\n")
     normalize = args.no_normalize
     ibaq = args.ibaq
     case_sens = args.case_sensitive
+    mod_site = args.modification_site
     unique = args.unique_only
     out_position = args.position
     precursor_columns = [int(i) for i in args.precursors.split(',')] if args.precursors else None
@@ -94,41 +102,66 @@ def main():
         else:
             normalizations = [1 for peptide in peptide_history for intensities in peptide_history[peptide]]
     protein_grouping = {}
+    peptide_grouping = {}
     with args.peptide_out as o:
         writer = csv.writer(o, delimiter=delimiter)
         header = ['Peptide', 'PSMS', 'Total Precursor Area']
         if inference:
-            header.append('Proteins')
+            header.append(inferred_name)
         if ibaq:
             if normalize:
                 header.append('Normalized Precursor Intensity')
             header.append('iBAQ')
         if out_position:
-            header.append('Peptide Protein Position')
+            header.append('Peptide %s Position'%inferred_name)
+        if mod_site:
+            header.append('Modification Positions')
         writer.writerow(header)
         for index, (peptide, d) in enumerate(peptide_history.iteritems()):
+            try:
+                peptide_dict = peptide_grouping[peptide]
+            except KeyError:
+                peptide_dict = {}
+                peptide_grouping[peptide] = peptide_dict
             if not index%1000:
                 sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
             precursor_int = float(sum([sum(d[i]) for i in d]))
             entry = [peptide, sum([len(d[i]) for i in d]), precursor_int]
-            if inference or ibaq:
-                sites = [match.start() for match in re.finditer(peptide, protein_sequences)]
-                if out_position:
-                     indices = [(protein_sequences.count('\n', 0, match_position), match_position-protein_sequences[:match_position].rfind('\n')) for match_position in sites]
-                else:
-                     indices = [(protein_sequences.count('\n', 0, match_position), 0) for match_position in sites]
-            if inference:
-                proteins = [fasta_headers[i[0]] for i in indices]
-                matches = ';'.join(proteins)
-                if unique:
-                    proteins = list(set(proteins))
-                if not unique or len(proteins) == 1:
-                    for protein_index, protein in enumerate(proteins):
-                        try:
-                            protein_grouping[protein][peptide] = d
-                        except KeyError:
-                            protein_grouping[protein] = {peptide: d}
-                entry.append(matches)
+            peptide_dict = peptide_dict.get('inference', {})
+            if not peptide_dict:
+                peptide_dict['inference'] = {'proteins': False}
+                if inference or ibaq:
+                    sites = [match.start() for match in re.finditer(peptide.upper(), protein_sequences)]
+                    if out_position or mod_site:
+                         indices = [(protein_sequences.count('\n', 0, match_position), match_position-protein_sequences[:match_position].rfind('\n')) for match_position in sites]
+                    else:
+                         indices = [(protein_sequences.count('\n', 0, match_position), 0) for match_position in sites]
+                if inference:
+                    proteins = [fasta_headers[i[0]] for i in indices]
+                    if mod_site:
+                        start_positions = [i[1] for i in indices]
+                    matches = ';'.join(proteins)
+                    if unique:
+                        proteins = list(set(proteins))
+                    if not unique or len(proteins) == 1:
+                        for protein_index, protein in enumerate(proteins):
+                            try:
+                                protein_grouping[protein][peptide] = d
+                            except KeyError:
+                                protein_grouping[protein] = {peptide: d}
+                    entry.append(matches)
+                    peptide_dict['inference']['proteins'] = matches
+                    if mod_site:
+                        mod_site_additions = []
+                        for start_position, protein in zip(start_positions, proteins):
+                            mod_site_addition = []
+                            for j,k in enumerate(peptide):
+                                if k.islower():
+                                    mod_site_addition.append('%s:%d'%(k,start_position+j))
+                            mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
+                        peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
+                    if out_position:
+                        peptide_dict['inference']['matched_positions'] = ','.join(str(i[1]) for i in indices)
             if ibaq:
                 ibaqs = []
                 intensities = [sum(d[i]) for i in d]
@@ -146,12 +179,16 @@ def main():
                     ibaqs.append(precursor_int/peptides)
                 entry.append(';'.join(str(i) for i in ibaqs))
             if out_position:
-                entry.append(','.join(str(i[1]) for i in indices))
+                # entry.append(','.join(str(i[1]) for i in indices))
+                entry.append(peptide_dict['inference']['matched_position'])
+            if mod_site:
+                # entry.append(';'.join(mod_site_additions))
+                entry.append(peptide_dict['inference']['mod_sites'])
             writer.writerow(entry)
     if inference:
         with args.protein_out as o:
             writer = csv.writer(o, delimiter=delimiter)
-            header = ['Protein', 'Peptides', 'Total Precursor Area']
+            header = [inferred_name, 'Peptides', 'Total Precursor Area']
             if ibaq:
                 if normalize:
                     header.append('Normalized Precursor Intensity')
@@ -179,6 +216,34 @@ def main():
                     else:
                         entry.append('NA')
                 writer.writerow(entry)
+    tsv_file = open(tsv_file.name)
+    with tsv_file as f:
+        reader = csv.reader(f, delimiter=delimiter)
+        with out_file as o:
+            out_writer = csv.writer(o, delimiter=delimiter)
+            for line_num, entry in enumerate(reader):
+                if line_num < header_lines:#we assume the first header line is the one we care about
+                    if inference:
+                        entry.append(inferred_name)
+                    if out_position:
+                        entry.append('Peptide %s Position'%inferred_name)
+                    if mod_site:
+                        entry.append('Modification Position')
+                else:
+                    peptide = entry[peptide_column]
+                    if not case_sens:
+                        peptide = peptide.upper()
+                    if inference:
+                        entry.append()
+                    d = peptide_grouping.get(peptide,False)
+                    if d:
+                        if inference:
+                            entry.append(d['inference']['proteins'])
+                        if out_position:
+                            entry.append(d['inference']['matched_position'])
+                        if mod_site:
+                            entry.append(d['inference']['mod_sites'])
+                    out_writer.writerow(entry)
 
 
 if __name__ == "__main__":
