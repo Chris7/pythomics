@@ -30,7 +30,7 @@ class ScanObject(object):
     """
     def __init__(self):
         self.scans = []
-        self.rt = ''
+        self.rt = 0.0
         self.ms_level = None
 
     def writeScan(self, o):

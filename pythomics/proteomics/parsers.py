@@ -45,6 +45,9 @@ class GenericProteomicIterator(object):
     def getChromatogram(self):
         pass
 
+    def getBaseTrace(self):
+        pass
+
 
 class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename):
@@ -838,7 +841,6 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.cur.execute(sql)
         self.fileMap = {}
         self.sFileMap = {}
-        self.scans = []
         for i in self.cur.fetchall():
             self.fileMap[str(i[0])]=str(i[1])
             self.sFileMap[i[0]]=lastSplit.search(i[1]).group(1)
@@ -846,6 +848,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         sql = 'select a.AminoAcidModificationID,a.ModificationName, a.DeltaMass from aminoacidmodifications a'
         self.cur.execute(sql)
         self.modTable = {}
+        self.scans = []
         for i in self.cur.fetchall():
             self.modTable[i[0]] = (i[1],i[2])
         #We fetch all modifications here for temporary storage because it is VERY expensive to query peptide by peptide (3 seconds per 100 on my 500 MB test file, with 300,000 scans that's horrid)
@@ -868,6 +871,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d GROUP BY p.SpectrumID'%clvl
             self.cur.execute(sql)
         self.index = 0
+        self.master_scans = {}
 
     def loadChromatogram(self):
         sql = 'select * from chromatograms'
@@ -896,6 +900,13 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             self.loadChromatogram()
         return self.chromatogram
 
+    def getBaseTrace(self):
+        try:
+            return self.basetrace
+        except AttributeError:
+            self.loadChromatogram()
+        return self.basetrace
+
     def getScan(self, specId, peptide=None):
         """
         get a random scan
@@ -915,11 +926,11 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         objs = []
         self.index+=1
         added = set([])#for some reason redundant scans appear
-        for confidence, searchRank, sequence, pepId, proId in zip(i[0].split(','),i[1].split(','),i[2].split(','),i[3].split(','),i[4].split(',')):
-            if (sequence,pepId,proId) in added:
+        for confidence, searchRank, sequence, pepId in zip(i[0].split(','),i[1].split(','),i[2].split(','),i[3].split(',')):
+            if (sequence,pepId) in added:
                 continue
             else:
-                added.add((sequence,pepId,proId))
+                added.add((sequence,pepId))
             scanObj = PeptideObject()
             try:
                 mods = self.mods[int(pepId)]
@@ -932,8 +943,9 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.peptide = sequence
             scanObj.rank = searchRank
             scanObj.confidence = confidence
-            scanObj.acc = proId
+            scanObj.acc = i[4]
             scanObj.charge = i[6]
+            scanObj.rt = i[7]
             fName = self.sFileMap[i[10]]
             fScan = i[8]
             lScan = i[9]
@@ -965,6 +977,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             stage = 0
             #this is dirty, but unfortunately the fastest method at the moment
             # print msInfo
+            ms1_scans = []
             for row in msStr:
                 if stage == 0:
                     if 'FileID' in row:
@@ -977,6 +990,8 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         #sid = '%s.%s.%s'%(fName, finfo[2],finfo[2])
                         scanObj.title = sid
                         scanObj.id = sid
+                        scanObj.rt = float(finfo[7])
+                        master_scan = finfo[5]
                         stage=1
                 elif stage == 1:
                     if 'PrecursorInfo' in row:
@@ -995,7 +1010,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         stage = 4
                     elif '<Peak X' in row:
                         finfo = row.split('"')
-                        scanObj.ms1_scans.append((float(finfo[1]),float(finfo[3])))
+                        ms1_scans.append((float(finfo[1]),float(finfo[3])))
                 elif stage == 4:
                     #we just grab the ms/ms peaks at the moment
                     if 'Peak X' in row:
@@ -1005,6 +1020,17 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         break
         if msInfo:
 	    # print scanObj.scans
+            if master_scan != "-1" and ms1_scans:
+                master_scanobj = self.master_scans.get(master_scan, None)
+                if master_scanobj is None:
+                    master_scanobj = ScanObject()
+                    self.master_scans[master_scan] = master_scanobj
+                    master_scanobj.title = master_scan
+                    master_scanobj.ms_level = 1
+                    master_scanobj.rt = scanObj.rt
+                master_scanobj.scans += ms1_scans
+                master_scanobj.scans.sort(key=lambda x: x[0])
+                scanObj.ms1_scan = master_scanobj
             return scanObj
         else:
             return None
@@ -1014,11 +1040,26 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             i = self.cur.fetchone()
             #we go by groups
             if not i:
-                raise StopIteration
+                if self.master_scans:
+                    print 'loading master'
+                    if isinstance(self.master_scans, dict):
+                        self.master_scans = self.master_scans.values()
+                    self.scans = self.master_scans
+                else:
+                    raise StopIteration
             self.scans = self.parseScan(i)
             if not self.scans:
-                raise StopIteration
-        return self.scans.pop(0)
+                if self.master_scans:
+                    if isinstance(self.master_scans, dict):
+                        self.master_scans = self.master_scans.values()
+                    self.scans = self.master_scans
+                else:
+                    raise StopIteration
+            else:
+                scan = self.scans.pop(0)
+        else:
+            scan = self.scans.pop(0)
+        return scan
 
     def getProgress(self):
         return self.index*100/self.nrows
