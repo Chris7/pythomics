@@ -58,10 +58,14 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         
         """
         super(MZMLIterator, self).__init__(filename)
+        self.scans = {}
+        if isinstance(self.filename, gzip.GzipFile):
+            self.gzip = True
+        else:
+            self.gzip = False
         try:
             if isinstance(self.filename, gzip.GzipFile):
-                print 'gzip not supported'
-                dom1 = etree.parse(self.filename).findall('{http://psi.hupo.org/ms/mzml}spectrum')#, tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML'))
+                dom1 = etree.parse(self.filename).iter(tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogramList'))
             else:
                 dom1 = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogramList'))
             self.lxml = True
@@ -89,6 +93,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         if spectra.tag == '{0}indexedmzML'.format(namespace):
             # read our index in
             self.ra = dict([(self._get_scan_from_string(i.values()[0]), i.text) for i in spectra.findall('{0}indexList/{0}index/'.format(namespace))])
+            return None
         elif spectra.tag == '{0}spectrum'.format(namespace):
             scanObj = ScanObject()
             if full:
@@ -133,24 +138,37 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             chromObj.intensities = intensities
             self.chromatogram = chromObj
             return None
-        else:
-            raise StopIteration
+        # elif spect:
+        #     raise StopIteration
     
     def next(self):
         if self.spectra:
             spectra = self.spectra.next()
         else:
             raise StopIteration
-        return self.parselxml(spectra[1])
+        if self.gzip:
+            scan = self.parselxml(spectra, full=True)
+            if isinstance(scan, ScanObject):
+                self.scans[scan.title] = scan
+            return scan
+        else:
+            return self.parselxml(spectra[1])
 
     def getChromatogram(self):
         return self.chromatogram
 
     def getScan(self, id, peptide=None):
         try:
-            if isinstance(self.filename, gzip.GzipFile):
-                pass
-                # return self.parselxml(spectra, full=True, namespace='')
+            if self.gzip:
+                #read the whole damn thing in...
+                scan = None
+                if id in self.scans:
+                    return self.scans[id]
+                for spectra in self.spectra.next():
+                    scan = self.parselxml(spectra, full=True)
+                    self.scans[scan.id] = scan
+                if id in self.scans:
+                    return self.scans[id]
             else:
                 if not self.ra:
                     [i for i in self]
