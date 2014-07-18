@@ -9,6 +9,7 @@ use this annotation to include iBAQ measures.
 """
 
 import argparse, sys, re, csv, copy, decimal
+from collections import Counter
 from pythomics.templates import CustomParser
 import pythomics.proteomics.config as config
 import pythomics.proteomics.digest as digest
@@ -72,6 +73,8 @@ def main():
         cleaved = {}
     protein_sequences = '\n'.join(protein_sequences)
     peptide_history = {}
+    pep_count = 0
+    pep_set = set([])
     with tsv_file as f:
         reader = csv.reader(f, delimiter=delimiter)
         for line_num, entry in enumerate(reader):
@@ -83,8 +86,10 @@ def main():
                         normalizations = [0 for i in precursor_columns]
             else:
                 peptide = entry[peptide_column]
+                pep_count+=1
                 if not case_sens:
                     peptide = peptide.upper()
+                pep_set.add(peptide)
                 for n_i, e_i in enumerate(precursor_columns):
                     if entry[e_i]:
                         intensity = decimal.Decimal(entry[e_i])
@@ -103,6 +108,9 @@ def main():
             normalizations = [1 for peptide in peptide_history for intensities in peptide_history[peptide]]
     protein_grouping = {}
     peptide_grouping = {}
+    stats = {'peptides': pep_count}
+    stats['peptides_found'] = len(pep_set)
+    proteins_mapped = set([])
     with args.peptide_out as o:
         writer = csv.writer(o, delimiter=delimiter)
         header = ['Peptide', 'PSMS', 'Total Precursor Area']
@@ -139,6 +147,7 @@ def main():
                     proteins = [fasta_headers[i[0]] for i in indices]
                     if mod_site:
                         start_positions = [i[1] for i in indices]
+                    proteins_mapped|=set(proteins)
                     matches = ';'.join(proteins)
                     if unique:
                         proteins = list(set(proteins))
@@ -184,10 +193,13 @@ def main():
                 # entry.append(';'.join(mod_site_additions))
                 entry.append(peptide_dict['inference']['mod_sites'])
             writer.writerow(entry)
+    stats['proteins_mapped'] = len(proteins_mapped)
     if inference:
         with args.protein_out as o:
             writer = csv.writer(o, delimiter=delimiter)
             header = [inferred_name, 'Peptides', 'Total Precursor Area']
+            if mod_site:
+                header.append('Modification Positions')
             if ibaq:
                 if normalize:
                     header.append('Normalized Precursor Intensity')
@@ -198,7 +210,23 @@ def main():
                 intensities = []
                 precursor_int = 0
                 peptide_psm_count = []
+                mods = set([])
                 for peptide in protein_grouping[protein]:
+                    if mod_site:
+                        peptide_dict = peptide_grouping.get(peptide, False)
+                        if peptide_dict:
+                            mod_proteins = peptide_dict['inference']['mod_sites']
+                            for mod_protein in mod_proteins.split(';'):
+                                #mod protein looks like:
+                                #WBGene00004829(y:467,k:471);WBGene00019361(m:68);WBGene00019361(m:118);WBGene00019361(m:68);WBGene00020808(m:261);WBGene00020808(m:156)
+                                mod_prots = mod_protein.split(';')
+                                for mod_prot_ in mod_prots:
+                                    mod_prot, mod_prot_sites = mod_prot_.split('(')
+                                    if mod_prot == protein:
+                                        for mod_prot_site in mod_prot_sites[:-1].split(','):
+                                            if mod_prot_site:
+                                                mod_aa, mod_prot_site = mod_prot_site[:-1].split(':')
+                                                mods.add((mod_aa, mod_prot_site))
                     d = protein_grouping[protein][peptide]
                     peptide_psm_count.append((peptide,sum([len(d[i]) for i in d])))
                     intensities += [sum(d[i]) for i in d]
@@ -206,6 +234,10 @@ def main():
                         precursor_int += sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
                 entry.append(';'.join(['%s(%s)' % (i,j) for i,j in peptide_psm_count]))
                 entry.append(sum(intensities))
+                if mod_site:
+                    mods = list(mods)
+                    mods.sort(key=lambda x:x[1])
+                    entry.append(';'.join(['%s%s'%(i,j) for i,j in mods]))
                 if ibaq:
                     if normalize:
                         entry.append(precursor_int)
@@ -218,8 +250,10 @@ def main():
     tsv_file = open(tsv_file.name)
     with tsv_file as f:
         reader = csv.reader(f, delimiter=delimiter)
+        mod_stats = {}
         with out_file as o:
             out_writer = csv.writer(o, delimiter=delimiter)
+            total_mods = Counter()
             for line_num, entry in enumerate(reader):
                 if line_num < header_lines:#we assume the first header line is the one we care about
                     if inference:
@@ -233,14 +267,48 @@ def main():
                     if not case_sens:
                         peptide = peptide.upper()
                     d = peptide_grouping.get(peptide,False)
+                    total_mods.update([k for k in peptide if k.islower()])
                     if d:
                         if inference:
                             entry.append(d['inference']['proteins'])
                         if out_position:
                             entry.append(d['inference']['matched_position'])
                         if mod_site:
-                            entry.append(d['inference']['mod_sites'])
-                    out_writer.writerow(entry)
+                            mod_proteins = d['inference']['mod_sites']
+                            peptide_mods = {}
+                            mod_entry = []
+                            for mod_protein in mod_proteins.split(';'):
+                                #mod protein looks like:
+                                mod_prots = mod_protein.split(';')
+                                for mod_prot_ in mod_prots:
+                                    if not mod_prot_:
+                                        continue
+                                    mod_prot, mod_prot_sites = mod_prot_.split('(')
+                                    for mod_prot_site in mod_prot_sites[:-1].split(','):
+                                        if mod_prot_site:
+                                            mod_aa, mod_prot_site = mod_prot_site.split(':')
+                                            try:
+                                                peptide_mods[mod_prot].add((mod_aa, mod_prot_site))
+                                            except KeyError:
+                                                peptide_mods[mod_prot] = set([(mod_aa, mod_prot_site)])
+                                            try:
+                                                mod_stats[mod_aa].add((mod_prot, mod_prot_site))
+                                            except KeyError:
+                                                mod_stats[mod_aa] = set([(mod_prot, mod_prot_site)])
+                            for mod_prot, mods in peptide_mods.iteritems():
+                                modl = list(mods)
+                                modl.sort(key=lambda x: x[1])
+                                mod_entry.append('%s(%s)'%(mod_prot, ' '.join(['%s:%s'%(i,j) for i,j in modl])))
+                            entry.append(';'.join(mod_entry))
+                out_writer.writerow(entry)
+        stats['modifications'] = mod_stats
+    # write stats
+    sys.stderr.write('Peptides Searched: %s\n'%stats['peptides'])
+    sys.stderr.write('Unique Peptides Found: %s\n'%stats['peptides_found'])
+    sys.stderr.write('%s Mapped to: %s\n'%(inferred_name, stats['proteins_mapped']))
+    sys.stderr.write('Modifications:\n')
+    for site, sites in stats['modifications'].iteritems():
+        sys.stderr.write('  %s: %s found with %d potential sites (%d mappings)\n'%(site, total_mods[site], len(sites), len(set([i[0] for i in sites]))))
 
 
 if __name__ == "__main__":
