@@ -332,7 +332,7 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
     Parser for X!Tandem XML Files.
     """
     def __init__(self, filename, **kwrds):
-        super(XTandemXML, self).__init__(filename)
+        super(XTandemXMLIterator, self).__init__(filename)
         #parse in our X!Tandem xml file
         if kwrds and kwrds['exclude']:
             exclude = set(kwrds['exclude'])
@@ -465,16 +465,16 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                     break
             for i in self.ra:
                 f.write('%s\t%d\t%d\n'%(i,self.ra[i][0],self.ra[i][1]))
-            self.f.seek(0)
+            self.filename.seek(0)
 
     def getScan(self, title, peptide=None):
         """
         allows random lookup
         """
         if self.ra.has_key(title):
-            self.f.seek(self.ra[title][0],0)
+            self.filename.seek(self.ra[title][0],0)
             toRead = self.ra[title][1]-self.ra[title][0]
-            info = self.f.read(toRead)
+            info = self.filename.read(toRead)
             scan = self.parseScan(info)
         else:
             return None
@@ -537,7 +537,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                 pass
             elif 'BEGIN IONS' in row:
                 if self.rand:
-                    pStart=self.f.tell()
+                    pStart=self.filename.tell()
                 setupScan=True
 #                newScan=True
             elif 'END IONS' in row:
@@ -549,11 +549,11 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                 return None
             elif setupScan:
                 scanInfo+=row
-            pos = self.f.tell()
-            row = self.f.readline()
+            pos = self.filename.tell()
+            row = self.filename.readline()
 
     def getProgress(self):
-        return self.f.tell()*100/self.epos
+        return self.filename.tell()*100/self.epos
 
 class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename):
