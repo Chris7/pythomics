@@ -89,6 +89,18 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
     def _get_scan_from_string(self, value):
         return value[value.find('scan=')+5:]
 
+    def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
+        if 'zlib compression' in params:
+            import zlib
+            array = zlib.decompress(base64.b64decode(array))
+        else:
+            array = base64.b64decode(array)
+        if '64-bit float' in params:
+            array = [struct.unpack('d', array[i:i+8])[0] for i in xrange(0,len(array),8)]
+        else:
+            array = [struct.unpack('f', array[i:i+4])[0] for i in xrange(0,len(array),4)]
+        return array
+
     def parselxml(self, spectra, full=False, namespace='{http://psi.hupo.org/ms/mzml}'):
         if spectra.tag == '{0}indexedmzML'.format(namespace):
             # read our index in
@@ -98,10 +110,10 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj = ScanObject()
             if full:
                 mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
-                mzmls = base64.b64decode(mzmls.find('{0}binary'.format(namespace)).text)
-                intensities = base64.b64decode(intensities.find('{0}binary'.format(namespace)).text)
-                mzmls = [struct.unpack('d', mzmls[i:i+8])[0] for i in xrange(0,len(mzmls),8)]
-                intensities = [struct.unpack('f', intensities[i:i+4])[0] for i in xrange(0,len(intensities),4)]
+                mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
+                mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
+                intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
+                intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
                 scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
             spectra_info = dict(zip(spectra.keys(),spectra.values()))
             spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
@@ -128,11 +140,9 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             for info in spectra.findall('{0}chromatogram/{0}binaryDataArrayList/'.format(namespace)):
                 chroma_params = dict([(i.get('name'), i.get('value')) for i in info.findall('{0}cvParam'.format(namespace))])
                 if 'intensity array' in chroma_params:
-                    intensities = base64.b64decode(info.find('{0}binary'.format(namespace)).text)
-                    intensities = [struct.unpack('f', intensities[i:i+4])[0] for i in xrange(0,len(intensities),4)]
+                    intensities = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
                 elif 'time array' in chroma_params:
-                    time_array = base64.b64decode(info.find('{0}binary'.format(namespace)).text)
-                    time_array = [struct.unpack('d', time_array[i:i+8])[0] for i in xrange(0,len(time_array),8)]
+                    time_array = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
             chromObj = Chromatogram()
             chromObj.times = time_array
             chromObj.intensities = intensities
