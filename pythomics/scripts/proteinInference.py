@@ -8,7 +8,8 @@ corresponding proteins present in an annotation file, and can also
 use this annotation to include iBAQ measures.
 """
 
-import argparse, sys, re, csv, copy, decimal
+import argparse, sys, re, csv, copy, decimal, itertools
+from multiprocessing import Pool
 from collections import Counter
 from pythomics.templates import CustomParser
 import pythomics.proteomics.config as config
@@ -36,10 +37,32 @@ protein_group.add_argument('--case-sensitive', help="Treat peptides as case-sens
 protein_group.add_argument('--modification-site', help="Write the position in the parent protein of the modification (requires case-sensitive and modifications being lower-cased).", action='store_true', default=False)
 
 
+global protein_sequences
+global fasta_headers
+cache = {}
+proteins = []
+fasta_headers = []
+protein_sequences = ''
+
+def mapper(peptides):
+    peptidestring = '(%s)'%'|'.join(peptides)
+    matches = [(i.group(1), i.start()) for i in re.finditer(peptidestring, protein_sequences)]
+    matches.sort(key=lambda x: x[0])
+    groups = itertools.groupby(matches, key=lambda x: x[0])
+    matched = {}
+    for peptide, peptide_grouped in groups:
+        indices = [(protein_sequences.count('\n', 0, match), match-protein_sequences[:match].rfind('\n')) for peptide, match in peptide_grouped]
+        found_proteins = [fasta_headers[i[0]] for i in indices]
+        matched[peptide] = {'proteins': found_proteins, 'positions': [i[1] for i in indices], 'indices': [i[0] for i in indices]}
+    return matched
+
 
 
 def main():
+    global protein_sequences
+    global fasta_headers
     args = parser.parse_args()
+    cores = args.p
     fasta_file = fasta.FastaIterator(args.fasta)
     peptide_column = args.col-1
     tsv_file = args.tsv
@@ -106,6 +129,16 @@ def main():
                     normalizations[i] += sum(v)
         else:
             normalizations = [1 for peptide in peptide_history for intensities in peptide_history[peptide]]
+
+    # map our peptides is a multi-cored manner
+    pool = Pool(cores)
+    # get our matches
+    plen = len(peptide_history)/cores+1
+    peptides = peptide_history.keys()
+    subpeptides = [peptides[n:n+plen] for n in xrange(0, len(peptides), plen)]
+    results = pool.map(mapper, subpeptides)
+    mapped_peptides = dict((k, v) for d in results for (k, v) in d.items())
+
     protein_grouping = {}
     peptide_grouping = {}
     stats = {'peptides': pep_count}
@@ -125,6 +158,7 @@ def main():
         if mod_site:
             header.append('Modification Positions')
         writer.writerow(header)
+        empty_dict = {'proteins': '', 'positions': [], 'indices': []}
         for index, (peptide, d) in enumerate(peptide_history.iteritems()):
             try:
                 peptide_dict = peptide_grouping[peptide]
@@ -133,20 +167,21 @@ def main():
                 peptide_grouping[peptide] = peptide_dict
             if not index%1000:
                 sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
+            mapped_info = mapped_peptides.get(peptide, empty_dict)
             precursor_int = float(sum([sum(d[i]) for i in d]))
             entry = [peptide, sum([len(d[i]) for i in d]), precursor_int]
             if 'inference' not in peptide_dict:
                 peptide_dict['inference'] = {'proteins': False}
-                if inference or ibaq:
-                    sites = [match.start() for match in re.finditer(peptide.upper(), protein_sequences)]
-                    if out_position or mod_site:
-                         indices = [(protein_sequences.count('\n', 0, match_position), match_position-protein_sequences[:match_position].rfind('\n')) for match_position in sites]
-                    else:
-                         indices = [(protein_sequences.count('\n', 0, match_position), 0) for match_position in sites]
+                # if inference or ibaq:
+                    # sites = [match.start() for match in re.finditer(peptide.upper(), protein_sequences)]
+                    # if out_position or mod_site:
+                    #      indices = [(protein_sequences.count('\n', 0, match_position), match_position-protein_sequences[:match_position].rfind('\n')) for match_position in sites]
+                    # else:
+                    #      indices = [(protein_sequences.count('\n', 0, match_position), 0) for match_position in sites]
                 if inference:
-                    proteins = [fasta_headers[i[0]] for i in indices]
+                    proteins = mapped_info['proteins']#[fasta_headers[i[0]] for i in indices]
                     if mod_site:
-                        start_positions = [i[1] for i in indices]
+                        start_positions = mapped_info['positions']#[i[1] for i in indices]
                     proteins_mapped|=set(proteins)
                     matches = ';'.join(proteins)
                     if unique:
@@ -169,14 +204,14 @@ def main():
                             mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
                         peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
                     if out_position:
-                        peptide_dict['inference']['matched_positions'] = ','.join(str(i[1]) for i in indices)
+                        peptide_dict['inference']['matched_positions'] = ','.join(str(i) for i in start_positions)
             if ibaq:
                 ibaqs = []
                 intensities = [sum(d[i]) for i in d]
                 if normalize:
                     precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
                     entry.append(precursor_int)
-                for protein_index in indices:
+                for protein_index in mapped_info['indices']:
                     peptides = cleaved.get(protein_index,None)
                     if peptides is None:
                         peptides = len(enzyme.cleave(ibaq_protein_sequence[protein_index], min=digest_min, max=digest_max))
@@ -221,7 +256,7 @@ def main():
                                 #WBGene00004829(y:467,k:471);WBGene00019361(m:68);WBGene00019361(m:118);WBGene00019361(m:68);WBGene00020808(m:261);WBGene00020808(m:156)
                                 mod_prots = mod_protein.split(';')
                                 for mod_prot_ in mod_prots:
-                                    mod_prot, mod_prot_sites = mod_prot_.split('(')
+                                    mod_prot, mod_prot_sites = mod_prot_.rsplit('(', 1)
                                     if mod_prot == protein:
                                         for mod_prot_site in mod_prot_sites[:-1].split(','):
                                             if mod_prot_site:
@@ -283,7 +318,7 @@ def main():
                                 for mod_prot_ in mod_prots:
                                     if not mod_prot_:
                                         continue
-                                    mod_prot, mod_prot_sites = mod_prot_.split('(')
+                                    mod_prot, mod_prot_sites = mod_prot_.rsplit('(', 1)
                                     for mod_prot_site in mod_prot_sites[:-1].split(','):
                                         if mod_prot_site:
                                             mod_aa, mod_prot_site = mod_prot_site.split(':')
