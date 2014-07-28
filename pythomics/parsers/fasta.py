@@ -48,7 +48,7 @@ class FastaIterator(templates.GenericIterator):
         while not row:
             row = self.fasta_file.next()
         if self.parse:
-                header = self.parse.match(row)
+            header = self.parse.match(row)
         else:
             header = row.strip()[self.delimiter_length:]
         #get our sequence

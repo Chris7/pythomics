@@ -6,11 +6,14 @@ import pythomics.proteomics.config as protein_config
 class GenericIterator(object):
     def __init__(self, filename, **kwrds):
         if isinstance(filename, (str, unicode)) and filename.endswith('.gz'):
-            self.filename = gzip.GzipFile(filename)
+            self.filename = gzip.open(filename)
         elif isinstance(filename, (str, unicode)):
             self.filename = open(filename)
         elif isinstance(filename, (file)):
-            self.filename = filename
+            if filename.name.endswith('.gz'):
+                self.filename = gzip.open(filename.name)
+            else:
+                self.filename = filename
         else:
             raise TypeError
         
@@ -24,6 +27,7 @@ class GenericIterator(object):
 class CustomParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwrds):
         super(CustomParser, self).__init__(*args, **kwrds)
+        self.add_argument('-p', help="Threads to run", type=int, default=1)
 
     def add_enzyme(self):
         self.add_argument('--enzyme', help="The enzyme to cleave with. Also valid is a"
