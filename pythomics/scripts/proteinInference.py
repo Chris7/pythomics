@@ -45,7 +45,7 @@ fasta_headers = []
 protein_sequences = ''
 
 def mapper(peptides):
-    peptidestring = '(%s)'%'|'.join(peptides)
+    peptidestring = '(%s)'%'|'.join([i.upper() for i in peptides])
     matches = [(i.group(1), i.start()) for i in re.finditer(peptidestring, protein_sequences)]
     matches.sort(key=lambda x: x[0])
     groups = itertools.groupby(matches, key=lambda x: x[0])
@@ -80,6 +80,9 @@ def main():
     mod_site = args.modification_site
     unique = args.unique_only
     out_position = args.position
+    if mod_site:
+        case_sens = True
+        inference = True
     precursor_columns = [int(i) for i in args.precursors.split(',')] if args.precursors else None
     if ibaq:
         enzyme = digest.Enzyme( enzyme=args.enzyme )
@@ -167,7 +170,7 @@ def main():
                 peptide_grouping[peptide] = peptide_dict
             if not index%1000:
                 sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
-            mapped_info = mapped_peptides.get(peptide, empty_dict)
+            mapped_info = mapped_peptides.get(peptide.upper(), empty_dict)
             precursor_int = float(sum([sum(d[i]) for i in d]))
             entry = [peptide, sum([len(d[i]) for i in d]), precursor_int]
             if 'inference' not in peptide_dict:
@@ -198,7 +201,7 @@ def main():
                         mod_site_additions = []
                         for start_position, protein in zip(start_positions, proteins):
                             mod_site_addition = []
-                            for j,k in enumerate(peptide):
+                            for j, k in enumerate(peptide):
                                 if k.islower():
                                     mod_site_addition.append('%s:%d'%(k,start_position+j))
                             mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
@@ -258,6 +261,7 @@ def main():
                                 for mod_prot_ in mod_prots:
                                     mod_prot, mod_prot_sites = mod_prot_.rsplit('(', 1)
                                     if mod_prot == protein:
+                                        # print mod_prot_sites
                                         for mod_prot_site in mod_prot_sites[:-1].split(','):
                                             if mod_prot_site:
                                                 mod_aa, mod_prot_site = mod_prot_site[:-1].split(':')
