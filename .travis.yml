@@ -3,7 +3,7 @@ install:
   - sudo pip install coveralls
 script:
   - sudo python setup.py install
-  - nosetests
+  - nosetests -vv --exclude=test_script.*.py
 language:
   - python
 python:
