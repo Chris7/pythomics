@@ -1,9 +1,9 @@
 install:
   - sudo pip install -r requirements.txt
-  - sudo pip install coveralls
+  - sudo pip install coveralls coverage
 script:
   - sudo python setup.py install
-  - nosetests -vv --exclude=test_script.*.py
+  - nosetests -vv --exclude=test_script.*.py --with-coverage --cover-tests --cover-package=pythomics
 language:
   - python
 python:
