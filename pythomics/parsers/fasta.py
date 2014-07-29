@@ -71,7 +71,7 @@ class FastaIterator(templates.GenericIterator):
         try:
             handle = open(index, 'rb')
         except IOError:
-            print 'index not found, creating it'
+            sys.stderr.write('index not found, creating it\n')
             try:
                 self.build_fasta_index()
                 return

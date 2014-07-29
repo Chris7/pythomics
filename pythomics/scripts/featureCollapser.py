@@ -83,6 +83,7 @@ def main():
         for i in headers:
             writer.writerow(i)
         for index, (peptide, entries) in enumerate(peptide_history.iteritems()):
+            # print peptide
             if not index%1000:
                 sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
             if merge_columns:

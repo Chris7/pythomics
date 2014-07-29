@@ -83,7 +83,7 @@ class PeptideObject(ScanObject):
                     #found it
                     modType = i
             if not modType:
-                print 'mod not found',modMass
+                sys.stderr.write('mod not found %s\n'%modMass)
         self.mods.add((aa,str(position),str(modMass),str(modType)))
 
     def getModifications(self):

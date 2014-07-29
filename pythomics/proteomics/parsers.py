@@ -31,7 +31,7 @@ except ImportError:
 try:
     import msparser
 except ImportError:
-    print 'msparser not found, Mascot DAT files unable to be parsed'
+    sys.stderr.write('msparser not found, Mascot DAT files unable to be parsed\n')
 
 #regex for common use
 scanSplitter = re.compile(r'[\t\s]')
@@ -71,7 +71,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             self.lxml = True
         except NameError:
             self.lxml = False
-            print 'MZML parsing unavailable: lxml is required to parse mzML files'
+            sys.stderr.write('MZML parsing unavailable: lxml is required to parse mzML files\n')
             return
         if self.lxml:
             self.spectra = dom1
@@ -191,7 +191,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
                 spectra = etree.fromstring(''.join(row))
             return self.parselxml(spectra, full=True, namespace='')
         except IndexError:
-            print 'mzml cannot find', id
+            sys.stderr.write('mzml cannot find %s\n'%id)
             return None
 
 class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
@@ -223,7 +223,7 @@ class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
             self.lxml = True
         except NameError:
             self.lxml = False
-            print 'pepXML parsing unavailable: lxml is required to parse mzML files'
+            sys.stderr.write('pepXML parsing unavailable: lxml is required to parse mzML files\n')
             return
         if self.lxml:
             self.spectra = dom1
@@ -334,7 +334,7 @@ class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
         try:
             return self.scans[id]
         except IndexError:
-            print 'pepxml cannto find', id
+            sys.stderr.write('pepxml cannto find %s\n'%id)
             return None
 
 class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
@@ -353,7 +353,7 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
             self.lxml = True
         except NameError:
             self.lxml = False
-            print 'XTandem parsing unavailable: lxml is required to parse X!tandem xml files due to the namespaces employed'
+            sys.stderr.write('XTandem parsing unavailable: lxml is required to parse X!tandem xml files due to the namespaces employed\n')
             return
         if self.lxml:
             self.group = dom1.findall("group")
@@ -464,7 +464,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
             except UnboundLocalError:
                 self.epos=1
         except IOError:
-            print 'building index for:',path
+            sys.stderr.write('building index for: %s\n'%path)
             if os.path.exists(path):
                 raise Exception("Index file path: %s found, but appears incomplete"%path)
             f = open(path, 'wb')
@@ -584,13 +584,13 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
             self.quantFile.setSchemaFileName(''.join(["http://www.matrixscience.com/xmlns/schema/quantitation_2","quantitation_2.xsd"," http://www.matrixscience.com/xmlns/schema/quantitation_1","quantitation_1.xsd"]))
             if self.resfile.getQuantitation(self.quantFile):
                 if not self.quantFile.isValid():#true if errors
-                    print 'quant file invalid'
+                    sys.stderr.write('quant file invalid\n')
                 else:
                     self.quantMethod = self.quantFile.getMethodByName(self.sparams.getQUANTITATION())
                     if self.quantMethod:
                         errors = self.quantFile.validateDocument()
                         if errors:
-                            print 'quant errors',errors
+                            sys.stderr.write('quant errors %s\n'%errors)
                         else:
                             self.qstring = self.quantMethod.getProtocol().getType()
                             self.quantMethod = msparser.ms_quant_method(self.qstring)
@@ -603,19 +603,19 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
             for i in xrange(self.quantMethod.getNumberOfModificationGroups()):
                 modGroup = self.quantMethod.getModificationGroupByNumber(i)
                 for j in modGroup.getNumberOfLocalDefinitions():
-                    print 'qunt sub thing',modGroup.getLocalDefinitions(j)
-                    print 'get from the unimod xml later'
+                    sys.stderr.write('qunt sub thing %s\n'%modGroup.getLocalDefinitions(j))
+                    sys.stderr.write('get from the unimod xml later\n')
             for i in xrange(self.quantMethod.getNumberOfComponents()):
                 objComponent = self.quantMethod.getComponentByNumber(i)
                 for j in xrange(objComponent.getNumberOfModificationGroups()):
                     modGroup = objComponent.getModificationGroupByNumber(j)
                     for k in modGroup.getNumberOfLocalDefinitions():
-                        print 'qunt sub thing',modGroup.getLocalDefinitions(k)
-                        print 'get from the unimod xml later'
+                        sys.stderr.write('qunt sub thing%s\n'%modGroup.getLocalDefinitions(k))
+                        sys.stderr.write('get from the unimod xml later\n')
         self.massFile = msparser.ms_masses(self.uModFile)
         self.modFile = msparser.ms_modfile(self.uModFile, msparser.ms_umod_configfile.MODFILE_FLAGS_ALL)
         if not self.modFile.isValid():
-            print 'parser error in mod file, add actual errors later'
+            sys.stderr.write('parser error in mod file, add actual errors later\n')
             return
         self.massType = msparser.MASS_TYPE_MONO
         if self.sparams.getMASS() == "average":
@@ -628,7 +628,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
             if objMod:
                 self.vMods.appendModification(objMod)
             else:
-                print 'Mod',modName,'not found'
+                sys.stderr.write('Mod %s not found\n'%modName)
             vInd+=1
             modText = self.resfile.getSectionValueStr(msparser.ms_mascotresfile.SEC_MASSES, "delta%d"%vInd)
         self.vecFixed = msparser.ms_modvector();
@@ -640,7 +640,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
             if objMod:
                 self.vecFixed.appendModification(objMod);
             else:
-              print 'Mod',modName,'not found'
+              sys.stderr.write('Mod %s not found\n'%modName)
             vInd+=1
             modText = self.resfile.getSectionValueStr(msparser.ms_mascotresfile.SEC_MASSES, "FixedMod%d"%vInd)
         seci = 1
@@ -813,9 +813,9 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                                         self.aahelper.setAvailableModifications(self.vecFixed,self.vMods)
                                         fres = self.aahelper.calcFragmentsEx(pep, rule, chargeState, 0, pep.getMrCalc(), self.sparams.getMassType(), frags, errs)
                                         if not fres:
-                                            print 'no fragments made'
-                                            print frags
-                                            print errs.getLastErrorString()
+                                            sys.stderr.write('no fragments made\n')
+                                            sys.stderr.write('%s\n'%frags)
+                                            sys.stderr.write('%s\n'%errs.getLastErrorString())
                                         else:
                                             frags.addExperimentalData(self.resfile, query)
                                             for frag in (frags.getFragmentByNumber(fragIndex) for fragIndex in xrange(frags.getNumberOfFragments())):
@@ -842,7 +842,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                                                 fragname = self.fragRuleMapping[rule]
                                             except KeyError:
                                                 fragname = ""
-                                            print 'fragment name',fragname
+                                            sys.stderr.write('fragment name%s\n'%fragname)
                         scanObj.matched = matched
 #                        print matched
                     specId = self.specParse.search(stitle).group(1)
@@ -892,7 +892,6 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d GROUP BY p.SpectrumID'%(clvl,srank)
             self.cur.execute(sql)
         except sqlite3.OperationalError:
-            print 'error'
             sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d'%clvl
             self.nrows = self.conn.execute(sql).fetchone()[0]
             #sql = 'select sp.spectrum,p.ConfidenceLevel,p.ConfidenceLevel,p.Sequence,p.PeptideID,pp.ProteinID,p.SpectrumID from spectra sp left join peptides p on (p.SpectrumID=sp.UniqueSpectrumID) left join peptidesproteins pp on (p.PeptideID=pp.PeptideID) where p.PeptideID IS NOT NULL'
@@ -1069,7 +1068,6 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             #we go by groups
             if not i:
                 if self.master_scans:
-                    print 'loading master'
                     if isinstance(self.master_scans, dict):
                         self.master_scans = self.master_scans.values()
                     self.scans = self.master_scans

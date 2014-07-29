@@ -35,7 +35,7 @@ def main():
     aas.sort()
     tlen = 0
     if args.parallel and args.series:
-        print 'Unable to do both parallel and sequential digestion in a single run'
+        sys.stderr.write('Unable to do both parallel and sequential digestion in a single run\n')
         return 1
     if not args.parallel:
         args.series = True
