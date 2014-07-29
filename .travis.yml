@@ -2,6 +2,7 @@ install:
   - sudo pip install -r requirements.txt
   - sudo pip install coveralls
 script:
+  - sudo python setup.py install
   - nosetests
 language:
   - python
