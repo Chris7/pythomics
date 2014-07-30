@@ -25,7 +25,7 @@ parser.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (
 
 def main():
     args = parser.parse_args()
-    peptide_column = args.col-1
+    peptide_column = args.col-1 if args.col > 0 else args.col
     tsv_file = args.tsv
     header_lines = args.header
     delimiter = args.delimiter
