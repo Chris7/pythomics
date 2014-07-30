@@ -4,6 +4,7 @@ install:
 script:
   - sudo python setup.py install
   - nosetests -vv --exclude=test_script.*.py --with-coverage --cover-tests --cover-package=pythomics
+  - coverage report -m
 language:
   - python
 python:
