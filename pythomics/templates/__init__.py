@@ -9,7 +9,7 @@ class GenericIterator(object):
             self.filename = gzip.open(filename)
         elif isinstance(filename, (str, unicode)):
             self.filename = open(filename)
-        elif isinstance(filename, (file)):
+        elif isinstance(filename, (file,)):
             if filename.name.endswith('.gz'):
                 self.filename = gzip.open(filename.name)
             else:

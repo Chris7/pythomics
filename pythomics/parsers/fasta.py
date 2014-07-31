@@ -54,7 +54,7 @@ class FastaIterator(templates.GenericIterator):
         #get our sequence
         row = self.fasta_file.next()
         while row and row[0:self.delimiter_length] != self.delimiter:
-            seq+=row.strip()
+            seq += row.strip()
             try:
                 row = self.fasta_file.next()
             except StopIteration:
@@ -84,7 +84,7 @@ class FastaIterator(templates.GenericIterator):
             #stored as: {header: length, # of chars to end of this header, length of fasta lines, length of each line including breakchar}
             _seq_dict[entry[0]] = (entry[1], entry[2], entry[3], entry[4])
             
-    def get_sequence(self, chrom, start, end, strand='+', indexing=(-1,0)):
+    def get_sequence(self, chrom, start, end, strand='+', indexing=(-1, 0)):
         """
         chromosome is entered relative to the file it was built with, so it can be 'chr11' or '11',
         start/end are coordinates, which default to python style [0,1) internally. So positions should be
@@ -109,7 +109,7 @@ class FastaIterator(templates.GenericIterator):
         #go to start of chromosome
         seekpos = int(self.sequence_index[chrom][1])
         #find how many newlines we have
-        seekpos += start+(start)/divisor
+        seekpos += start+start/divisor
         slen = end-start
         endpos = slen+slen/divisor+1 #a hack of sorts but it works and is easy
         self.fasta_file.seek(seekpos, 0)
@@ -140,24 +140,25 @@ class FastaIterator(templates.GenericIterator):
                 m = chromReg.match(row)
                 total_read += len(row)
                 if m:
-                    header_end[m.group(1)] = total_read
+                    header_end[m.group(1).strip()] = total_read
                     if header:
                         #this is always the LAST header
-                        self.sequence_index[header] = (sequence_read, header_end[header], without_break[header], with_break[header])
+                        self.sequence_index[stripped_header] = (sequence_read, header_end[stripped_header], without_break[stripped_header], with_break[stripped_header])
                         sequence_read = 0
                     header = m.group(1)
-                    header_order.append(header)
+                    stripped_header = header.strip()
+                    header_order.append(stripped_header)
                     sequence_read = 0
                 else:
-                    if header not in with_break:
-                        with_break[header] = len(row)
-                    if header not in without_break:
-                        without_break[header] = len(row.strip())
+                    if stripped_header not in with_break:
+                        with_break[stripped_header] = len(row)
+                    if stripped_header not in without_break:
+                        without_break[stripped_header] = len(row.strip())
                     sequence_read += len(row.strip())
                 row = f.readline()
             #for the last one we found
-            header_order.append(header)
-            self.sequence_index[header] = (sequence_read, header_end[header], without_break[header], with_break[header])
+            header_order.append(stripped_header)
+            self.sequence_index[stripped_header] = (sequence_read, header_end[stripped_header], without_break[stripped_header], with_break[stripped_header])
             for header in header_order:
                 d = self.sequence_index[header]
                 o.write('%s\t%d\t%d\t%d\t%d\n'%(header,d[0],d[1],d[2],d[3]))
