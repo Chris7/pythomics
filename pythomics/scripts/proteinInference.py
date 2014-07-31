@@ -86,7 +86,7 @@ def main():
     precursor_columns = [int(i) for i in args.precursors.split(',')] if args.precursors else None
     if ibaq:
         enzyme = digest.Enzyme( enzyme=args.enzyme )
-    fasta_headers, protein_sequences = zip(*[(header, sequence) for header, sequence in fasta_file])
+    fasta_headers, protein_sequences = zip(*[(header.replace(';', ''), sequence) for header, sequence in fasta_file])
     #replace headers with parsed ones
     if args.regex:
         regex = re.compile(args.regex)
@@ -259,13 +259,16 @@ def main():
                                 #WBGene00004829(y:467,k:471);WBGene00019361(m:68);WBGene00019361(m:118);WBGene00019361(m:68);WBGene00020808(m:261);WBGene00020808(m:156)
                                 mod_prots = mod_protein.split(';')
                                 for mod_prot_ in mod_prots:
-                                    mod_prot, mod_prot_sites = mod_prot_.rsplit('(', 1)
-                                    if mod_prot == protein:
-                                        # print mod_prot_sites
-                                        for mod_prot_site in mod_prot_sites[:-1].split(','):
-                                            if mod_prot_site:
-                                                mod_aa, mod_prot_site = mod_prot_site[:-1].split(':')
-                                                mods.add((mod_aa, mod_prot_site))
+                                    try:
+                                        mod_prot, mod_prot_sites = mod_prot_.rsplit('(', 1)
+                                        if mod_prot == protein:
+                                            # print mod_prot_sites
+                                            for mod_prot_site in mod_prot_sites[:-1].split(','):
+                                                if mod_prot_site:
+                                                    mod_aa, mod_prot_site = mod_prot_site[:-1].split(':')
+                                                    mods.add((mod_aa, mod_prot_site))
+                                    except:
+                                        print 'failed', mod_prot_, mod_prots, mod_proteins
                     d = protein_grouping[protein][peptide]
                     peptide_psm_count.append((peptide,sum([len(d[i]) for i in d])))
                     intensities += [sum(d[i]) for i in d]

@@ -23,13 +23,12 @@ class Test_Fasta_Iterator(unittest.TestCase):
         self.assertEqual( 'ddb5a96ada0f651bffeb8ef856c76faf610ca669a68be904b0acb8b8', digest, "Fasta get_sequence #1 Failure")
         f.fasta_file.close()
 
-
     def test_fasta_index_build(self):
         f = parser.FastaIterator(self.handle)
         f.build_fasta_index()
-        out = '\n'.join([row for row in open(self.index)])
+        out = '\n'.join([row.strip() for row in open(self.index, 'rb')])
         digest = hashlib.sha224(out).hexdigest()
-        self.assertEqual( '877289a9c28d3e2a2d2878b08d9dfe66642120497d87050078e3931b', digest, "Fasta Index Build Failure")
+        self.assertEqual( 'e071a4ec04e59d55231dc667e06b81b17d96fad0d40fe2ac883e9fe3', digest, "Fasta Index Build Failure")
         
         
 suite = unittest.TestLoader().loadTestsFromTestCase(Test_Fasta_Iterator)
