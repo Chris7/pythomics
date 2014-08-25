@@ -5,8 +5,19 @@ import pythomics.templates as templates
 import pythomics.genomics.structures as structure
 import pythomics.genomics.config as config
 
+class VCFMixin(object):
+    vcf_file = None
 
-class VCFIterator(templates.GenericIterator):
+    def get_header(self, individual=-1):
+        return self.vcf_file.get_header(individual=individual)
+
+    def get_individual(self, individual=None):
+        if individual is None:
+            return self.vcf_file.individuals.keys()
+        return self.vcf_file.get_individual(individual=individual)
+
+
+class VCFIterator(templates.GenericIterator, VCFMixin):
     
     def __init__(self, filename):
         """An iterator over the VCF file format
@@ -31,6 +42,8 @@ class VCFIterator(templates.GenericIterator):
                 assert(self.vcf_file.add_contig(row))
             elif row.startswith('##ALT='):
                 assert(self.vcf_file.add_alt(row))
+            elif row.startswith('##'):
+                assert(self.vcf_file.add_extra(row))
             row = self.filename.next().strip()
         #got to the end of meta information, we now have the header
         assert(self.vcf_file.add_header(row))
@@ -39,13 +52,13 @@ class VCFIterator(templates.GenericIterator):
         return self
     
     def next(self):
-        row = self.filename.next()
-        while not row:
+        row = self.filename.next().strip()
+        while not row or row.startswith('#'):
             row = self.filename.next()
         self.inum+=1
         if self.inum%100000 == 0:
             sys.stderr.write('Processed %d VCF entries\n' % self.inum)
-        return self.vcf_file.parse_entry( row.strip() )
+        return self.vcf_file.parse_entry(row.strip())
 
 
 class GFFIterator(templates.GenericIterator):
@@ -70,7 +83,19 @@ class GFFIterator(templates.GenericIterator):
 
 
 class BedIterator(templates.GenericIterator):
-    pass
+    def __init__(self, filename):
+        super(BedIterator, self).__init__(filename)
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        row = self.filename.next()
+        while not row:#skip blanks
+            row = self.filename.next()
+        ob = structure.BedObject()
+        ob.parse(row)
+        return ob
 
 
 class BamIterator(templates.GenericIterator):
@@ -233,8 +258,8 @@ class GFFReader(templates.GenericIterator):
     def get_features(self):
         return self.feature_map.iteritems()
 
-class VCFReader(templates.GenericIterator):
-    def __init__(self, filename, append_chromosome=False):
+class VCFReader(templates.GenericIterator, VCFMixin):
+    def __init__(self, filename, append_chromosome=False, store_positions=True):
         """This will read an entire VCF file and allow for querying based on attributes such
          location, individuals.
 
@@ -244,21 +269,34 @@ class VCFReader(templates.GenericIterator):
         super(VCFReader, self).__init__(filename)
         self.positions = {}
         self.append_chromosome = append_chromosome
-        for vcf_entry in VCFIterator(filename):
+        self.vcf_iterator = VCFIterator(filename)
+        self.vcf_file = self.vcf_iterator.vcf_file
+        self.vcf_entries = []
+        for vcf_entry in self.vcf_iterator:
             chrom, start = vcf_entry.chrom, vcf_entry.pos
             if append_chromosome:
                 chrom = 'chr%s' % chrom
-            start = int(start)
-            furthest_end = max([abs(i) if i else None for i in vcf_entry.get_alt_lengths()])
-            if furthest_end:
-                end = start+abs(furthest_end)
-                try:
-                    self.positions[chrom][(start, end)].append(vcf_entry)
-                except KeyError:
+            if store_positions:
+                start = int(start)
+                furthest_end = max([abs(i) if i else None for i in vcf_entry.get_alt_lengths()])
+                if furthest_end:
+                    end = start+abs(furthest_end)
                     try:
-                        self.positions[chrom][(start, end)] = [vcf_entry]
+                        self.positions[chrom][(start, end)].append(vcf_entry)
                     except KeyError:
-                        self.positions[chrom] = {(start, end): [vcf_entry]}
+                        try:
+                            self.positions[chrom][(start, end)] = [vcf_entry]
+                        except KeyError:
+                            self.positions[chrom] = {(start, end): [vcf_entry]}
+            self.vcf_entries.append(vcf_entry)
+
+    def get_sample(self, individual=0):
+        if isinstance(individual, str):
+            individual = self.get_individual(individual=individual)
+        for entry in self.vcf_entries:
+            if entry.has_variant(individual=individual):
+                yield entry
+
 
     def contains(self, chrom, start, end, overlap=True):
         """This returns a list of VCFEntry objects which cover a specified location.

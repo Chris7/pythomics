@@ -9,7 +9,7 @@ use this annotation to include iBAQ measures.
 """
 
 import argparse, sys, re, csv, copy, decimal, itertools
-from multiprocessing import Pool
+from multiprocessing import Pool, Value
 from collections import Counter
 from pythomics.templates import CustomParser
 import pythomics.proteomics.config as config
@@ -52,7 +52,7 @@ def mapper(peptides):
     matched = {}
     for peptide, peptide_grouped in groups:
         indices = [(protein_sequences.count('\n', 0, match), match-protein_sequences[:match].rfind('\n')) for peptide, match in peptide_grouped]
-        found_proteins = [fasta_headers[i[0]] for i in indices]
+        found_proteins = list(set([fasta_headers[i[0]] for i in indices]))
         matched[peptide] = {'proteins': found_proteins, 'positions': [i[1] for i in indices], 'indices': [i[0] for i in indices]}
     return matched
 
@@ -61,6 +61,7 @@ def mapper(peptides):
 def main():
     global protein_sequences
     global fasta_headers
+    peptides_mapped = Value('i', 0)
     args = parser.parse_args()
     cores = args.p
     fasta_file = fasta.FastaIterator(args.fasta)
@@ -136,8 +137,9 @@ def main():
     # map our peptides is a multi-cored manner
     pool = Pool(cores)
     # get our matches
-    plen = len(peptide_history)/cores+1
+    plen = 100#len(peptide_history)/cores+1
     peptides = peptide_history.keys()
+    # break into groups of 100 (empirically gives fastest mapping)
     subpeptides = [peptides[n:n+plen] for n in xrange(0, len(peptides), plen)]
     results = pool.map(mapper, subpeptides)
     mapped_peptides = dict((k, v) for d in results for (k, v) in d.items())

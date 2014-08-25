@@ -1,6 +1,8 @@
 __author__ = 'Chris Mitchell'
 
 import sys
+from collections import OrderedDict
+from pythomics.genomics import config
 
 class VCFFile(object):
     def __init__(self, filename):
@@ -16,8 +18,12 @@ class VCFFile(object):
         self.filename = filename
         self.meta = VCFMeta()
         self.n_individuals = 0
-        self.individuals = {}
+        self.individuals = OrderedDict() # maps individual name to index
         self.entries = {}
+
+    def add_extra(self, entry):
+        """Parses the VCF extra info that is usually at the top of the file"""
+        return self.meta.add_extra(entry)
 
     def add_info(self, entry):
         """Parses the VCF Info field and returns a VCFMeta object"""
@@ -35,8 +41,8 @@ class VCFFile(object):
         """Parses the VCF Header field and returns the number of samples in the VCF file"""
         info = entry.split('\t')
         self.n_individuals = len(info)-9
-        for i in xrange(self.n_individuals):
-            self.individuals[i] = []
+        for i in xrange(9, len(info)):
+            self.individuals[info[i]] = i
         return self.n_individuals > 0
 
     def add_contig(self, entry):
@@ -52,7 +58,7 @@ class VCFFile(object):
         the call (such as alternative allele, zygosity, etc.)
 
         """
-        var_call = VCFEntry(self.n_individuals)
+        var_call = VCFEntry(self.individuals)
         var_call.parse_entry(row)
         return var_call
 
@@ -61,10 +67,41 @@ class VCFFile(object):
         return the VCFEntry as well.
 
         """
-        var_call = VCFEntry(self.n_individuals)
+        var_call = VCFEntry(self.individuals)
         var_call.parse_entry( row )
         self.entries[(var_call.chrom, var_call.pos)] = var_call
         return var_call
+
+    def get_header(self, individual=-1):
+        """Returns the vcf header
+
+        """
+        type_map = dict([(val,key) for key,val in self.meta.type_map.iteritems()])
+        extra = '\n'.join(['##{0}'.format(i) for i in self.meta.extra])
+        info = '\n'.join(['##INFO=<ID={0},Number={1},Type={2},Description={3}>'.format(key, val.get('num_entries','.'), type_map.get(val.get('type', '')), val.get('description')) for key,val in self.meta.info.iteritems()])
+        filter = '\n'.join(['##FILTER=<ID={0},Description={1}>'.format(key, val.get('description','.')) for key,val in self.meta.filter.iteritems()])
+        format = '\n'.join(['##FORMAT=<ID={0},Number={1},Type={2},Description={3}>'.format(key, val.get('num_entries','.'), type_map.get(val.get('type', '')), val.get('description')) for key,val in self.meta.format.iteritems()])
+        alt = '\n'.join(['##ALT=<ID={0},Description={1}>'.format(key, val.get('description','.')) for key,val in self.meta.alt.iteritems()])
+        header = '\t'.join(['#CHROM','POS','ID','REF','ALT','QUAL','FILTER','INFO','FORMAT'])
+        if individual is not None:
+            if individual == -1:
+                individual = '\t'.join(self.individuals.keys())
+            else:
+                if isinstance(individual, int):
+                    for i, v in self.individuals.iteritems():
+                        if v == individual:
+                            individual = i
+                            break
+            header += '\t'+individual
+        return '\n'.join([extra, info, filter, format, alt, header])
+
+
+    def get_individual(self, individual=None):
+        """Returns the index of the individual
+        """
+
+        return self.individuals.get(individual, None)
+
 
 class VCFMeta(object):
 
@@ -75,10 +112,16 @@ class VCFMeta(object):
         such as the format fields, ids, and filters.
     
         """
-        self.info = {}
-        self.filter = {}
-        self.format = {}
+        self.info = OrderedDict()
+        self.filter = OrderedDict()
+        self.format = OrderedDict()
+        self.alt = OrderedDict()
+        self.extra = []
         self.type_map = {'Integer': int, 'Float': float, 'Numeric': float, 'Character': str, 'String': str, 'Flag': int}
+
+    def add_extra(self, entry):
+        self.extra.append(entry[2:])
+        return True
 
     def add_info(self, entry):
         """Parse and store the info field"""
@@ -87,7 +130,7 @@ class VCFMeta(object):
         if len(info) < 4:
             return False
         for v in info:
-            key, value = v.split('=')
+            key, value = v.split('=', 1)
             if key == 'ID':
                 self.info[value] = {}
                 id_ = value
@@ -111,7 +154,7 @@ class VCFMeta(object):
         if len(info) < 2:
             return False
         for v in info:
-            key, value = v.split('=')
+            key, value = v.split('=', 1)
             if key == 'ID':
                 self.filter[value] = {}
                 id_ = value
@@ -128,7 +171,7 @@ class VCFMeta(object):
         if len(info) < 4:
             return False
         for v in info:
-            key, value = v.split('=')
+            key, value = v.split('=', 1)
             if key == 'ID':
                 self.format[value] = {}
                 id_ = value
@@ -152,31 +195,32 @@ class VCFMeta(object):
         if len(info) < 2:
             return False
         for v in info:
-            key, value = v.split('=')
+            key, value = v.split('=', 1)
             if key == 'ID':
-                self.format[value] = {}
+                self.alt[value] = {}
                 id_ = value
             elif key == 'Description':
-                self.format[id_]['description'] = value
+                self.alt[id_]['description'] = value
                 if len(info) > 4:
-                    self.format[id_]['description'] += '; '.join(info[4:])
+                    self.alt[id_]['description'] += '; '.join(info[4:])
                 break
         return True
 
 class VCFEntry(object):
-    def __init__(self, individuals):
+    def __init__(self, individuals=None):
         """The VCFEntry object holds our sample information such as the
         reference genotype, the alternative genotypes, phase information, etc.
 
         """
-        self.passed = [False for __ in xrange(individuals)]
-        self.phase = ['/' for __ in xrange(individuals)]
-        self.genotype = [[-1,-1]  for __ in xrange(individuals)]
-        self.genome_quality = [-1 for __ in xrange(individuals)]
-        self.depth = [-1 for __ in xrange(individuals)]
+        # These are all indexed by the samples index so we can do out of order
+        # indexing without having to build empty lists
+        self.phase = {}
+        self.genotype = {}
+        self.genome_quality = {}
+        self.depth = {}
+        self.individuals = individuals
         self.gfilter = ""
         self.alt = None
-        self.info = {}
         self.GT = -1
         self.GQ = -1
         self.DP = -1
@@ -184,19 +228,45 @@ class VCFEntry(object):
         self.ploidy = 2
 
     def __str__(self):
-        """Returns the VCF entry as it appears in the vcf file, minus sample info currently"""
-        info = self.info.keys()
-        values = [self.info[i] for i in info]
-#         if self.GT != -1:
-#         if self.GQ != -1:
-#         if self.DP != -1:
-#         if self.FT != -1:
-#         sample_info = self.genotype[n]
+        """Returns the VCF entry as it appears in the vcf file minus sample info"""
         return '\t'.join([self.chrom, self.pos, self.id, '.' if not self.ref else self.ref,
                           '.' if not self.alt else ','.join(self.alt), self.qual,
                           'PASS' if self.passed else ';'.join(self.passed),
-                          ';'.join(['%s=%s' % (i,j) for i,j in zip(info,values)]),
+                          self.info,
                           ';'.join(self.format)])
+
+    def sample_string(self, individual=-1):
+        """Returns the VCF entry as it appears in the vcf file"""
+        base = str(self)
+        extra = self.get_sample_info(individual=individual)
+        extra = [':'.join([str(j) for j in i]) for i in zip(*extra.values())]
+        return '\t'.join([base, '\t'.join(extra)])
+
+    def get_sample_info(self, individual=-1):
+        """Returns the sample info of a given sample or all by default
+
+        """
+        if isinstance(individual, str):
+            individual = self.individuals[individual]
+        extra = OrderedDict()
+        for format_ in self.format:
+            index = getattr(self, format_)
+            if index != -1:
+                if format_ == 'GT':
+                    d = self.genotype
+                elif format_ == 'GQ':
+                    d = self.genome_quality
+                elif format_ == 'DP':
+                    d = self.depth
+                if individual == -1:
+                    if len(d) != len(self.samples):
+                        [self.parse_sample(i) for i in xrange(len(self.samples))]
+                    extra[format_] = [d[i] for i in xrange(len(d))]
+                else:
+                    if individual not in d:
+                        self.parse_sample(individual)
+                    extra[format_] = [d[individual]]
+        return extra
 
     def is_homozygous(self, sample = None):
         """This will give a boolean list corresponding to whether each individual
@@ -218,17 +288,22 @@ class VCFEntry(object):
         else:
             return [True if ((i == 0 and j > 0) or (i > 0 and j == 0)) else False for i,j in self.genotype]
 
+
     def get_alt(self, individual=0, nucleotides_only=True):
         """Returns the alternative alleles of the individual as a list"""
         #not i.startswith(',') is put in to handle cases like <DEL:ME:ALU> where we have no alternate allele
         #but some reference
+        if isinstance(individual, str):
+            individual = self.individuals[individual]
         if nucleotides_only:
-            return [self.alt[i-1].replace('.','') for i in self.genotype[individual] if i > 0 and not self.alt[i-1].startswith('<')]
+            return [self.alt[i-1].replace('.', '') for i in self.genotype[individual] if i > 0 and not self.alt[i-1].startswith('<')]
         else:
-            return [self.alt[i-1].replace('.','') for i in self.genotype[individual] if i > 0]
+            return [self.alt[i-1].replace('.', '') for i in self.genotype[individual] if i > 0]
 
     def get_alt_length(self, individual=0):
         """Returns the number of basepairs of each alternative allele"""
+        if isinstance(individual, str):
+            individual = self.individuals[individual]
         return [len(self.alt[i-1].replace('.','')) for i in self.genotype[individual] if i > 0 and not self.alt[i-1].startswith('<')]
 
     def get_alt_lengths(self):
@@ -249,6 +324,8 @@ class VCFEntry(object):
 
     def has_snp(self, individual=0):
         """Returns a boolean list of SNP status, ordered by samples"""
+        if isinstance(individual, str):
+            individual = self.individuals[individual]
         alts = self.get_alt(individual=individual)
         if alts:
             return [i != self.ref and len(i) == len(self.ref) for i in alts]
@@ -256,6 +333,8 @@ class VCFEntry(object):
 
     def has_insertion(self, individual=0):
         """Returns a boolean list of insertion status, ordered by samples"""
+        if isinstance(individual, str):
+            individual = self.individuals[individual]
         alts = self.get_alt(individual=individual)
         if alts:
             return [i != self.ref and len(i) > len(self.ref) for i in alts]
@@ -263,29 +342,36 @@ class VCFEntry(object):
 
     def has_deletion(self, individual=0):
         """Returns a boolean list of deletion status, ordered by samples"""
+        if isinstance(individual, str):
+            individual = self.individuals[individual]
         alts = self.get_alt(individual=individual)
         if alts:
             return [i != self.ref and len(i) < len(self.ref) for i in alts]
         return [False]
 
+    def has_variant(self, individual=0):
+        if isinstance(individual, str):
+            individual = self.individuals[individual]
+        if individual not in self.genotype:
+            self.parse_sample(individual)
+        gt = self.genotype[individual]
+        return not gt.count('0') == len(gt)-1
+
     def parse_entry(self, entry):
         """This parses a VCF row and stores the relevant information"""
         entry = entry.split('\t')
         self.chrom, self.pos, self.id, self.ref, alt_, self.qual, filter_, info, self.format = entry[:9]
-        samples = entry[9:]
+        self.samples = entry[9:]
         self.alt = alt_.split(',')
         if filter_ == 'PASS' or filter_ == '.':
             self.passed = True
         else:
             self.passed = filter_.split(';')
-        if info != '.':
-            info_l = info.split(';')
-            for v in info_l:
-                if '=' in v:
-                    key, value = v.split('=')
-                else:
-                    key, value = v, "1"
-                self.info[key] = value
+        self.info = info
+        # currently unused
+        #if info != '.':
+            #info_l = info.split(';')
+            #self.info = [v.split('=') if '=' in v else (v,1) for v in info_l]
         self.format = self.format.split(':')
         if 'GT' in self.format:
             self.GT = self.format.index('GT')
@@ -295,37 +381,62 @@ class VCFEntry(object):
             self.DP = self.format.index('DP')
         if 'FT' in self.format:
             self.FT = self.format.index('FT')
+
+    def parse_sample(self, individual=-1):
         #on to the samples
         self.extra_sample_info = {}
-        for n, sample in enumerate(samples):
-            for info_n, sample_info in enumerate(sample.split(':')):
-                if info_n == self.GT:
-                    if len(sample_info) == 3 and (sample_info[1] == '|' or sample_info[1] == '/'):
-                        self.phase[n] = sample_info[1]
-                        self.genotype[n] = [int(i) if i != '.' else -1 for i in sample_info.split(sample_info[1])]
-                elif info_n == self.GQ:
-                    if not sample_info:
-                        self.genome_quality[n] = None
-                    elif sample_info == '.':
-                        sample_info = -1
-                    else:
-                        sample_info = int(sample_info)
-                    if sample_info > 99:
-                        sample_info = 99
-                    self.genome_quality[n] = sample_info
-                elif info_n == self.DP:
-                    if not sample_info or sample_info == '.':
-                        self.depth[n] = -1
-                    else:
-                        self.depth[n] = int(sample_info)
-                elif info_n == self.FT:
-                    #not supported, I haven't encountered this yet
-                    pass
+        if isinstance(individual, str):
+            individual = self.individuals[individual]
+        sample = self.samples[individual]
+        for info_n, sample_info in enumerate(sample.split(':')):
+            if info_n == self.GT:
+                if len(sample_info) == 3 and ('|' in sample_info or '/' in sample_info):
+                    self.genotype[individual] = sample_info
+            elif info_n == self.GQ:
+                if not sample_info:
+                    self.genome_quality[individual] = None
+                elif sample_info == '.':
+                    sample_info = -1
                 else:
-                    self.extra_sample_info[info_n] = sample_info
+                    sample_info = int(sample_info)
+                if sample_info > 99:
+                    sample_info = 99
+                self.genome_quality[individual] = sample_info
+            elif info_n == self.DP:
+                if not sample_info or sample_info == '.':
+                    self.depth[individual] = -1
+                else:
+                    self.depth[individual] = int(sample_info)
+            elif info_n == self.FT:
+                #not supported, I haven't encountered this yet
+                pass
+            else:
+                try:
+                    self.extra_sample_info[individual][info_n] = sample_info
+                except KeyError:
+                    self.extra_sample_info[individual] = {info_n: sample_info}
+
+class SequenceObject(object):
+    chrom = None
+    start = None
+    end = None
+
+    def __len__(self):
+        return self.end-self.start
 
 
-class GFFObject(object):
+class BedObject(SequenceObject):
+    name = None
+    strand = None
+
+    def parse(self, entry):
+        if not isinstance(entry, list):
+            entry = entry.split('\t')
+        for order, attribute in zip(config.BED_ORDER, entry):
+            setattr(self, order, attribute)
+
+
+class GFFObject(SequenceObject):
     def __init__(self, info_delimiter=';', key_delimiter='=', quotechar='', attribute_delimiter=','):
         self.info_delimiter = info_delimiter
         self.key_delimiter = key_delimiter
@@ -354,9 +465,6 @@ class GFFObject(object):
                 if value.startswith(self.quotechar) and value.endswith(self.quotechar):
                     value = value[len(self.quotechar):-1*len(self.quotechar)]
             self.attributes[key] = value
-
-    def __len__(self):
-        return self.end-self.start
 
     def __str__(self):
         attributes = self.info_delimiter.join(['%s%s%s%s%s' % (key,self.key_delimiter,self.quotechar,value,self.quotechar)
