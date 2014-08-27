@@ -233,7 +233,7 @@ class VCFEntry(object):
                           '.' if not self.alt else ','.join(self.alt), self.qual,
                           'PASS' if self.passed else ';'.join(self.passed),
                           self.info,
-                          ';'.join(self.format)])
+                          ':'.join(self.format)])
 
     def sample_string(self, individual=-1):
         """Returns the VCF entry as it appears in the vcf file"""

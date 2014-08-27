@@ -10,11 +10,11 @@ class Test_VCF_Iterator(unittest.TestCase):
 
     def test_vcf_iterator(self):
         out = ""
-        f = parser.VCFIterator( self.handle )
-        assert(isinstance( f, parser.VCFIterator))
+        f = parser.VCFIterator(self.handle)
+        assert(isinstance(f, parser.VCFIterator))
         out = '\n'.join([str(row) for row in f])
         digest = hashlib.sha224(out).hexdigest()
-        self.assertEqual( 'debfe5ab13d9e1fe2abe860aa06ca243c7d61d82fff3c98c3569f711', digest, "VCF Iterator Failure")
+        self.assertEqual( '013ed0dc8b1a1de19d1a2997e95b40b9070c6b1d32f931f568816a0a', digest, "VCF Iterator Failure")
 
     def test_vcf_zygosity(self):
         pass
