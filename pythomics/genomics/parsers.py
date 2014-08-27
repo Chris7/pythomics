@@ -19,7 +19,7 @@ class VCFMixin(object):
 
 class VCFIterator(templates.GenericIterator, VCFMixin):
     
-    def __init__(self, filename):
+    def __init__(self, filename, sample=None):
         """An iterator over the VCF file format
         
         This reads VCF files and has been tested on VCF 4.0.
@@ -47,18 +47,27 @@ class VCFIterator(templates.GenericIterator, VCFMixin):
             row = self.filename.next().strip()
         #got to the end of meta information, we now have the header
         assert(self.vcf_file.add_header(row))
+        self.sample = sample
             
     def __iter__(self):
         return self
-    
-    def next(self):
+
+    def get_vcf_entry(self):
         row = self.filename.next().strip()
         while not row or row.startswith('#'):
-            row = self.filename.next()
+            row = self.filename.next().strip()
         self.inum+=1
         if self.inum%100000 == 0:
             sys.stderr.write('Processed %d VCF entries\n' % self.inum)
-        return self.vcf_file.parse_entry(row.strip())
+        vcf_entry = self.vcf_file.parse_entry(row)
+        return vcf_entry
+    
+    def next(self):
+        vcf_entry = self.get_vcf_entry()
+        if self.sample:
+            while vcf_entry and not vcf_entry.has_variant(self.sample):
+                vcf_entry = self.get_vcf_entry()
+        return vcf_entry
 
 
 class GFFIterator(templates.GenericIterator):

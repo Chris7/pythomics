@@ -41,8 +41,8 @@ class VCFFile(object):
         """Parses the VCF Header field and returns the number of samples in the VCF file"""
         info = entry.split('\t')
         self.n_individuals = len(info)-9
-        for i in xrange(9, len(info)):
-            self.individuals[info[i]] = i
+        for i,v in enumerate(info[9:]):
+            self.individuals[v] = i
         return self.n_individuals > 0
 
     def add_contig(self, entry):
