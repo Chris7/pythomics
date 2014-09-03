@@ -5,9 +5,9 @@ import pythomics.proteomics.config as protein_config
 
 class GenericIterator(object):
     def __init__(self, filename, **kwrds):
-        if isinstance(filename, (str, unicode)) and filename.endswith('.gz'):
+        if isinstance(filename, basestring) and filename.endswith('.gz'):
             self.filename = gzip.open(filename)
-        elif isinstance(filename, (str, unicode)):
+        elif isinstance(filename, basestring):
             self.filename = open(filename)
         elif isinstance(filename, (file,)):
             if filename.name.endswith('.gz'):
@@ -21,7 +21,7 @@ class GenericIterator(object):
         return self
     
     def next(self):
-        raise StopIteration
+        raise self.filename.next()
 
 
 class CustomParser(argparse.ArgumentParser):
@@ -45,6 +45,10 @@ class CustomParser(argparse.ArgumentParser):
 
     def add_fasta(self, help="The fasta file to operate on."):
         self.add_argument('-f', '--fasta', nargs='?', help=help, type=argparse.FileType('r'))
+
+    def add_read_pair(self):
+        self.add_argument('--left', help="The left (5') read pairs", nargs='?', type=argparse.FileType('r'))
+        self.add_argument('--right', help="The right (3') read pairs", nargs='?', type=argparse.FileType('r'))
 
     def add_out(self, help='The file to write results to. Leave blank for stdout,'):
         self.add_argument('-o', '--out', nargs='?', help=help, type=argparse.FileType('w'), default=sys.stdout)

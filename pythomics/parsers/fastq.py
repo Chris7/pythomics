@@ -10,10 +10,7 @@ class FastqIterator(templates.GenericIterator):
         
     def __iter__(self):
         return self
-    
+
     def next(self):
-        seq_header = self.fastq_file.next().strip()
-        seq = self.fastq_file.next().strip()
-        qual_header = self.fastq_file.next().strip()
-        qual_seq = self.fastq_file.next().strip()
-        return (seq_header,seq,qual_header,qual_seq)
+        # return is sequence header, sequence, quality header, quality sequence
+        return (self.fastq_file.next().strip(), self.fastq_file.next().strip() ,self.fastq_file.next().strip(), self.fastq_file.next().strip())
