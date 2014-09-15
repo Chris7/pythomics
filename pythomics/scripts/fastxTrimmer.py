@@ -137,7 +137,7 @@ def main():
                             if read_index % 2:
                                 # it's odd, write them both
                                 # check length
-                                if first_read[1] >= read_min and reads[1] >= read_min:
+                                if len(first_read[1]) >= read_min and len(reads[1]) >= read_min:
                                     o.write('%s\n'%'\n'.join(first_read))
                                     o2.write('%s\n'%'\n'.join(reads))
                             else:
@@ -145,7 +145,7 @@ def main():
                 else:
                     for result in results:
                         for read_index, reads in enumerate(result):
-                            if reads[1] >= read_min:
+                            if len(reads[1]) >= read_min:
                                 o.write('%s\n'%'\n'.join(reads))
                 read_list = []
         if paired:
@@ -161,7 +161,7 @@ def main():
                 if read_index % 2:
                     # it's odd, write them both
                     # check length
-                    if first_read[1] >= read_min and reads[1] >= read_min:
+                    if len(first_read[1]) >= read_min and len(reads[1]) >= read_min:
                         o.write('%s\n'%'\n'.join(first_read))
                         o2.write('%s\n'%'\n'.join(reads))
                 else:
@@ -169,7 +169,7 @@ def main():
     else:
         for result in results:
             for read_index, reads in enumerate(result):
-                if reads[1] >= read_min:
+                if len(reads[1]) >= read_min:
                     o.write('%s\n'%'\n'.join(reads))
     o.flush()
     o.close()
