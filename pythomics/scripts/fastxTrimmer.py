@@ -91,14 +91,14 @@ def main():
     else:
         import pythomics.parsers.fasta as fasta
         iterator = fasta.FastaIterator
+    if quality_offset < 0:
+        sys.stderr.write('Negative quality scores encountered with both phred64 and phred33 encoding. Please inspect your input.\n')
+        return 1
     fasta_one = iterator(first_file)
     if paired:
         fasta_two = iterator(second_file)
     chunk_size = args.chunk
     pool = Pool(cores)
-    if quality_offset < 0:
-        sys.stderr.write('Negative quality scores encountered with both phred64 and phred33 encoding. Please inspect your input.\n')
-        return 1
     if paired:
         left_base = '%s_1'%args.prefix
         right_base = '%s_2'%args.prefix
