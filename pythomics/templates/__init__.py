@@ -1,27 +1,64 @@
 import gzip
 import argparse
 import sys
+# from distutils import spawn
+from collections import deque
 import pythomics.proteomics.config as protein_config
 
+
 class GenericIterator(object):
+    gz = False
+    CHUNK_SIZE = 2**16
+    UNCONSUMED = ''
+    contents = []
+
     def __init__(self, filename, **kwrds):
         if isinstance(filename, basestring) and filename.endswith('.gz'):
-            self.filename = gzip.open(filename)
+            # if spawn.find_executable('zcat'):
+            #     import subprocess
+            #     p = subprocess.Popen(['zcat', filename])
+            #     from cStringIO import StringIO
+            #     self.filename = StringIO(p.communicate()[0])
+            # else:
+            self.gz = True
+            self.filename = gzip.GzipFile(filename)
         elif isinstance(filename, basestring):
             self.filename = open(filename)
         elif isinstance(filename, (file,)):
             if filename.name.endswith('.gz'):
-                self.filename = gzip.open(filename.name)
+                self.gz = True
+                self.filename = gzip.GzipFile(filename.name)
             else:
                 self.filename = filename
         else:
             raise TypeError
-        
+
     def __iter__(self):
         return self
     
     def next(self):
-        raise self.filename.next()
+        if self.gz:
+            if self.contents:
+                return self.contents.popleft()
+            new_contents = self.filename.read(self.CHUNK_SIZE)
+            if not new_contents:
+                if self.UNCONSUMED:
+                    uc = self.UNCONSUMED
+                    self.UNCONSUMED = ''
+                    return self.UNCONSUMED
+                raise StopIteration
+            if new_contents and new_contents[-1] != '\n':
+                new_uc_index = new_contents.rfind('\n')+1
+                new_unconsumed = new_contents[new_uc_index:]
+                new_contents = new_contents[:new_uc_index]
+            else:
+                new_unconsumed = ''
+            new_contents = self.UNCONSUMED+new_contents
+            self.contents = new_contents.split('\n')
+            self.UNCONSUMED = new_unconsumed
+            self.contents = deque(self.contents)
+        else:
+            return self.filename.next()
 
 
 class CustomParser(argparse.ArgumentParser):
