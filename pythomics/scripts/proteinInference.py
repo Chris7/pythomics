@@ -65,7 +65,10 @@ def main():
     args = parser.parse_args()
     cores = args.p
     fasta_file = fasta.FastaIterator(args.fasta)
-    peptide_column = args.col-1
+    try:
+        peptide_column = int(args.col)-1
+    except:
+        peptide_column = None
     tsv_file = args.tsv
     out_file = args.out
     header_lines = args.header
@@ -106,6 +109,11 @@ def main():
         reader = csv.reader(f, delimiter=delimiter)
         for line_num, entry in enumerate(reader):
             if line_num < header_lines:#we assume the first header line is the one we care about
+                if peptide_column is None:
+                    for i,v in enumerate(entry):
+                        if v.lower() == args.col.lower():
+                            peptide_column = i
+                            break
                 if not precursor_columns:
                         precursor_columns = [i for i, v in enumerate(entry) if 'precursor' in v.lower()]
                 if ibaq:
@@ -149,92 +157,93 @@ def main():
     stats = {'peptides': pep_count}
     stats['peptides_found'] = len(pep_set)
     proteins_mapped = set([])
-    with args.peptide_out as o:
-        writer = csv.writer(o, delimiter=delimiter)
-        header = ['Peptide', 'PSMS', 'Total Precursor Area']
-        if inference:
-            header.append(inferred_name)
-        if ibaq:
-            if normalize:
-                header.append('Normalized Precursor Intensity')
-            header.append('iBAQ')
-        if out_position:
-            header.append('Peptide %s Position'%inferred_name)
-        if mod_site:
-            header.append('Modification Positions')
-        writer.writerow(header)
-        empty_dict = {'proteins': '', 'positions': [], 'indices': []}
-        for index, (peptide, d) in enumerate(peptide_history.iteritems()):
-            try:
-                peptide_dict = peptide_grouping[peptide]
-            except KeyError:
-                peptide_dict = {}
-                peptide_grouping[peptide] = peptide_dict
-            if not index%1000:
-                sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
-            mapped_info = mapped_peptides.get(peptide.upper(), empty_dict)
-            precursor_int = float(sum([sum(d[i]) for i in d]))
-            entry = [peptide, sum([len(d[i]) for i in d]), precursor_int]
-            if 'inference' not in peptide_dict:
-                peptide_dict['inference'] = {'proteins': False}
-                # if inference or ibaq:
-                    # sites = [match.start() for match in re.finditer(peptide.upper(), protein_sequences)]
-                    # if out_position or mod_site:
-                    #      indices = [(protein_sequences.count('\n', 0, match_position), match_position-protein_sequences[:match_position].rfind('\n')) for match_position in sites]
-                    # else:
-                    #      indices = [(protein_sequences.count('\n', 0, match_position), 0) for match_position in sites]
-                if inference:
-                    proteins = mapped_info['proteins']#[fasta_headers[i[0]] for i in indices]
-                    if mod_site:
-                        start_positions = mapped_info['positions']#[i[1] for i in indices]
-                    proteins_mapped|=set(proteins)
-                    matches = ';'.join(proteins)
-                    if unique:
-                        proteins = list(set(proteins))
-                    if not unique or len(proteins) == 1:
-                        for protein_index, protein in enumerate(proteins):
-                            try:
-                                protein_grouping[protein][peptide] = d
-                            except KeyError:
-                                protein_grouping[protein] = {peptide: d}
-                    entry.append(matches)
-                    peptide_dict['inference']['proteins'] = matches
-                    if mod_site:
-                        mod_site_additions = []
-                        for start_position, protein in zip(start_positions, proteins):
-                            mod_site_addition = []
-                            for j, k in enumerate(peptide):
-                                if k.islower():
-                                    mod_site_addition.append('%s:%d'%(k,start_position+j))
-                            mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
-                        peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
-                    if out_position:
-                        peptide_dict['inference']['matched_positions'] = ','.join(str(i) for i in start_positions)
+    if not args.peptide_out.closed:
+        with args.peptide_out as o:
+            writer = csv.writer(o, delimiter=delimiter)
+            header = ['Peptide', 'PSMS', 'Total Precursor Area']
+            if inference:
+                header.append(inferred_name)
             if ibaq:
-                ibaqs = []
-                intensities = [sum(d[i]) for i in d]
                 if normalize:
-                    precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
-                    entry.append(precursor_int)
-                for protein_index in mapped_info['indices']:
-                    peptides = cleaved.get(protein_index,None)
-                    if peptides is None:
-                        peptides = len(enzyme.cleave(ibaq_protein_sequence[protein_index], min=digest_min, max=digest_max))
-                        cleaved[protein_index] = peptides
-                    if not peptides:
-                        ibaqs.append('NA')
-                        continue
-                    ibaqs.append(precursor_int/peptides)
-                entry.append(';'.join(str(i) for i in ibaqs))
+                    header.append('Normalized Precursor Intensity')
+                header.append('iBAQ')
             if out_position:
-                # entry.append(','.join(str(i[1]) for i in indices))
-                entry.append(peptide_dict['inference']['matched_position'])
+                header.append('Peptide %s Position'%inferred_name)
             if mod_site:
-                # entry.append(';'.join(mod_site_additions))
-                entry.append(peptide_dict['inference']['mod_sites'])
-            writer.writerow(entry)
+                header.append('Modification Positions')
+            writer.writerow(header)
+            empty_dict = {'proteins': '', 'positions': [], 'indices': []}
+            for index, (peptide, d) in enumerate(peptide_history.iteritems()):
+                try:
+                    peptide_dict = peptide_grouping[peptide]
+                except KeyError:
+                    peptide_dict = {}
+                    peptide_grouping[peptide] = peptide_dict
+                if not index%1000:
+                    sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
+                mapped_info = mapped_peptides.get(peptide.upper(), empty_dict)
+                precursor_int = float(sum([sum(d[i]) for i in d]))
+                entry = [peptide, sum([len(d[i]) for i in d]), precursor_int]
+                if 'inference' not in peptide_dict:
+                    peptide_dict['inference'] = {'proteins': False}
+                    # if inference or ibaq:
+                        # sites = [match.start() for match in re.finditer(peptide.upper(), protein_sequences)]
+                        # if out_position or mod_site:
+                        #      indices = [(protein_sequences.count('\n', 0, match_position), match_position-protein_sequences[:match_position].rfind('\n')) for match_position in sites]
+                        # else:
+                        #      indices = [(protein_sequences.count('\n', 0, match_position), 0) for match_position in sites]
+                    if inference:
+                        proteins = mapped_info['proteins']#[fasta_headers[i[0]] for i in indices]
+                        if mod_site:
+                            start_positions = mapped_info['positions']#[i[1] for i in indices]
+                        proteins_mapped|=set(proteins)
+                        matches = ';'.join(proteins)
+                        if unique:
+                            proteins = list(set(proteins))
+                        if not unique or len(proteins) == 1:
+                            for protein_index, protein in enumerate(proteins):
+                                try:
+                                    protein_grouping[protein][peptide] = d
+                                except KeyError:
+                                    protein_grouping[protein] = {peptide: d}
+                        entry.append(matches)
+                        peptide_dict['inference']['proteins'] = matches
+                        if mod_site:
+                            mod_site_additions = []
+                            for start_position, protein in zip(start_positions, proteins):
+                                mod_site_addition = []
+                                for j, k in enumerate(peptide):
+                                    if k.islower():
+                                        mod_site_addition.append('%s:%d'%(k,start_position+j))
+                                mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
+                            peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
+                        if out_position:
+                            peptide_dict['inference']['matched_positions'] = ','.join(str(i) for i in start_positions)
+                if ibaq:
+                    ibaqs = []
+                    intensities = [sum(d[i]) for i in d]
+                    if normalize:
+                        precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                        entry.append(precursor_int)
+                    for protein_index in mapped_info['indices']:
+                        peptides = cleaved.get(protein_index,None)
+                        if peptides is None:
+                            peptides = len(enzyme.cleave(ibaq_protein_sequence[protein_index], min=digest_min, max=digest_max))
+                            cleaved[protein_index] = peptides
+                        if not peptides:
+                            ibaqs.append('NA')
+                            continue
+                        ibaqs.append(precursor_int/peptides)
+                    entry.append(';'.join(str(i) for i in ibaqs))
+                if out_position:
+                    # entry.append(','.join(str(i[1]) for i in indices))
+                    entry.append(peptide_dict['inference']['matched_position'])
+                if mod_site:
+                    # entry.append(';'.join(mod_site_additions))
+                    entry.append(peptide_dict['inference']['mod_sites'])
+                writer.writerow(entry)
     stats['proteins_mapped'] = len(proteins_mapped)
-    if inference:
+    if inference and not args.protein_out.closed:
         with args.protein_out as o:
             writer = csv.writer(o, delimiter=delimiter)
             header = [inferred_name, 'Peptides', 'Total Precursor Area']
