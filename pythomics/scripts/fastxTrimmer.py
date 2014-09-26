@@ -18,7 +18,7 @@ parser.add_argument('--min-len', help="The minimum read length reads must be aft
 parser.add_argument('--prefix', help="If using paired reads, this is the filename prefix.", type=str)
 parser.add_argument('--quality', help='If provided, remove qualities below a given score.', type=int, default=0)
 parser.add_argument('--chunk', help='How many reads to submit to each core.', type=int, default=1000)
-parser.add_argument('--no-gzip', help='To disable compression with gzip.', action='store_false', default=True)
+parser.add_argument('--no-gzip', help='To disable compression with gzip.', action='store_false')
 
 start_trim = re.compile(r'^N+')
 end_trim = re.compile(r'N+$')

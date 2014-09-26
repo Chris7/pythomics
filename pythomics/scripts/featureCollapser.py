@@ -18,10 +18,10 @@ import pythomics.parsers.fasta as fasta
 parser = CustomParser(description = description)
 parser.add_delimited_file()
 parser.add_out()
-parser.add_argument('--substring', help='If set, merge features by partial matches (such as collapsing peptides into larger peptides)', action='store_true', default=False)
-parser.add_argument('--merge-columns', help="If set, columns of merged peptides will be combined.", action='store_true', default=False)
+parser.add_argument('--substring', help='If set, merge features by partial matches (such as collapsing peptides into larger peptides)', action='store_true')
+parser.add_argument('--merge-columns', help="If set, columns of merged peptides will be combined.", action='store_true')
 parser.add_argument('--merge-delimiter', help='The delimiter for column merges.', type=str, default=';')
-parser.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true', default=False)
+parser.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true')
 
 def main():
     args = parser.parse_args()

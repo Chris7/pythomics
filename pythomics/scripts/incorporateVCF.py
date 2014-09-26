@@ -19,12 +19,12 @@ parser.add_vcf()
 
 def main():
     args = parser.parse_args()
-    file_name = args.file
+    file_name = args.fasta
     vcf = args.vcf
-    snps = not args.no_snps
+    snps = args.no_snps
     dels = args.dels
     ins = args.ins
-    homs = not args.no_homozygous
+    homs = args.no_homozygous
     hets = args.heterozygous
     individual = args.individual-1
     fasta_file = fasta.FastaIterator(file_name)

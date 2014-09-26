@@ -17,8 +17,7 @@ parser.add_fasta()
 parser.add_out()
 parser.add_enzyme(help="Enzyme to use. Pass a command separated list (no spaces); "
                     "the order of enzymes will be the order of digestion if digesting in series.")
-parser.add_argument('--parallel', help="Should cleavages be done in parallel (default is serial digestion)?", action='store_true', default=False)
-parser.add_argument('--series', help="Should cleavages be done in series? (default)", action='store_true', default=True)
+parser.add_argument('--parallel', help="Should cleavages be done in parallel (default is serial digestion)?", action='store_true')
 
 
 def main():
@@ -34,14 +33,10 @@ def main():
     aas = config.RESIDUE_MASSES.keys()
     aas.sort()
     tlen = 0
-    if args.parallel and args.series:
-        sys.stderr.write('Unable to do both parallel and sequential digestion in a single run\n')
-        return 1
-    if not args.parallel:
-        args.series = True
+    parallel = args.parallel
     for protease_index,protease in enumerate(enzymes):
-        if args.parallel or protease_index == 0:
-            fasta_file = fasta.FastaIterator(args.file)
+        if parallel or protease_index == 0:
+            fasta_file = fasta.FastaIterator(args.fasta)
         enzyme = digest.Enzyme(enzyme=protease)
         sys.stderr.write('processing %s\n' % protease)
         #if doing in series, this iterator is not reset and will never run
@@ -53,7 +48,7 @@ def main():
             for peptide in set(enzyme.cleave(sequence, min=digest_min, max=999999)):
                 if len(peptide) > digest_max:
                     #we don't see this one
-                    if args.series:
+                    if not parallel:
                         try:
                             retained[header].add(peptide)
                         except KeyError:
@@ -68,13 +63,13 @@ def main():
                         coverageMap[header].add(peptide)
                     except KeyError:
                         coverageMap[header] = set([peptide])
-        if not args.parallel and protease_index > 0:
+        if not parallel and protease_index > 0:
             for header in retained:
                 sequences = copy.deepcopy(retained[header])
                 for sequence in sequences:
                     for peptide in set(enzyme.cleave(sequence, min=digest_min, max=999999)):
                         if len(peptide) > digest_max:
-                            if args.series:
+                            if not parallel:
                                 retained[header].add(peptide)
                         else:
                             try:
@@ -86,8 +81,8 @@ def main():
                             except KeyError:
                                 coverageMap[header] = set([peptide])
         sys.stderr.write('%d total peptides after digesting with %s\n' % (len(peptides_found),protease))
-        if args.parallel:
-            args.file.seek(0)
+        if parallel:
+            args.fasta.seek(0)
     unique_proteins = set([])
     for peptide in peptides_found:
         if len(peptides_found[peptide]) == 1:

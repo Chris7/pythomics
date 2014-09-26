@@ -16,10 +16,10 @@ parser = CustomParser(description = description)
 parser.add_fasta()
 parser.add_argument('-t', '--type', help="The type of fasta file (default protein).", choices=['prot','nt'], type=str, default='prot')
 parser.add_argument('--frame', help="If using a nucleotide file, translate in how many frames?", choices=[1,3,6], type=int)
-parser.add_argument('--genome', help="Are we translating a genome? This will keep chromosome positions in the header.", action='store_true', default=False)
+parser.add_argument('--genome', help="Are we translating a genome? This will keep chromosome positions in the header.", action='store_true')
 parser.add_out()
 parser.add_enzyme()
-parser.add_argument('--unique', help="Only return unique peptides per cleavage", action='store_true', default=False)
+parser.add_argument('--unique', help="Only return unique peptides per cleavage", action='store_true')
 
 def main():
     args = parser.parse_args()

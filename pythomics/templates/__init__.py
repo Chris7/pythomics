@@ -66,9 +66,8 @@ class CustomParser(argparse.ArgumentParser):
         super(CustomParser, self).__init__(*args, **kwrds)
         self.add_argument('-p', help="Threads to run", type=int, default=1)
 
-    def add_enzyme(self):
-        self.add_argument('--enzyme', help="The enzyme to cleave with. Also valid is a"
-                                           " cleavage pattern such as [KR]|{P}.",
+    def add_enzyme(self, help="The enzyme to cleave with. Also valid is a cleavage pattern such as [KR]|{P}."):
+        self.add_argument('--enzyme', help=help,
                           choices=protein_config.ENZYMES.keys(), type=str, default='trypsin')
         self.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
         self.add_argument('--max', help="Maximum cleavage length", type=int, default=30)
@@ -99,13 +98,13 @@ class CustomParser(argparse.ArgumentParser):
 
     def add_vcf(self, help="The VCF file to use."):
         self.add_argument('--vcf', help=help, type=argparse.FileType('r'))
-        self.add_argument('--no-homozygous', help="Don't include homozygous variants (default to include)", action='store_false', default=False)
-        self.add_argument('--heterozygous', help="Use heterozygous variants", action='store_true', default=False)
-        self.add_argument('--no-snps', help="Don't use SNPs (default to true).", action='store_false', default=False)
-        self.add_argument('--dels', help="Use Deletions.", action='store_true', default=False)
-        self.add_argument('--ins', help="Use Insertions.", action='store_true', default=False)
+        self.add_argument('--no-homozygous', help="Don't include homozygous variants (default to include)", action='store_false')
+        self.add_argument('--heterozygous', help="Use heterozygous variants", action='store_false')
+        self.add_argument('--no-snps', help="Don't use SNPs (default to true).", action='store_false')
+        self.add_argument('--dels', help="Use Deletions.", action='store_true')
+        self.add_argument('--ins', help="Use Insertions.", action='store_true')
         self.add_argument('--individual', help="The Individual to use.", type=int, default=1)
-        self.add_argument('--append-chromosome', help="Should 'chr' be appended to the chromosome column?.", action='store_true', default=False)
+        self.add_argument('--append-chromosome', help="Should 'chr' be appended to the chromosome column?.", action='store_true')
 
     def add_argument_group(self, *args, **kwargs):
         group = argparse._ArgumentGroup(self, *args, **kwargs)

@@ -22,20 +22,20 @@ gff_group = parser.add_argument_group('GFF file related options')
 gff_group.add_argument('--gff', help="The GFF file to use.", type=argparse.FileType('r'), required=True)
 gff_group.add_argument('--group-on', help="The key to group entries together by (such as transcript_id)", type=str, default='ID')
 gff_group.add_argument('--feature', help="The feature to use for fetching coordinates (such as CDS, does not apply with cufflinks flag).", type=str, default='')
-gff_group.add_argument('--cufflinks', help="If the gff file is in the standard cufflinks output", action='store_true', default=False)
+gff_group.add_argument('--cufflinks', help="If the gff file is in the standard cufflinks output", action='store_true')
 vcf_group = parser.add_argument_group('VCF file related options')
 vcf_group.add_vcf()
-vcf_group.add_argument('--variants-only', help="Only output transcripts with variants.", action='store_true', default=False)
+vcf_group.add_argument('--variants-only', help="Only output transcripts with variants.", action='store_true')
 splice_group = parser.add_argument_group('Splice Junction Options (if a variant falls over a exon-exon junction. Default is to ignore.)')
-splice_group.add_argument('--splice-partial', help="Partially splice variants (only include exonic portions of variant)", action='store_true', default=False)
+splice_group.add_argument('--splice-partial', help="Partially splice variants (only include exonic portions of variant)", action='store_true')
 
 
 def main():
     args = parser.parse_args()
-    snps = not args.no_snps
+    snps = args.no_snps
     dels = args.dels
     ins = args.ins
-    homs = not args.no_homozygous
+    homs = args.no_homozygous
     hets = args.heterozygous
     individual = args.individual-1
     fasta_file = fasta.FastaIterator(args.fasta)

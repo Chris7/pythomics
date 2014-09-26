@@ -16,7 +16,7 @@ parser = CustomParser(description = description, formatter_class=argparse.Argume
 parser.add_fasta()
 parser.add_out()
 parser.add_argument('--min', help="Minimum ORF length in amino acids.", type=int, default=50)
-parser.add_argument('--both-strands', help="Search both strands for ORFs.", action='store_true', default=False)
+parser.add_argument('--both-strands', help="Search both strands for ORFs.", action='store_true')
 
 def main():
     args = parser.parse_args()

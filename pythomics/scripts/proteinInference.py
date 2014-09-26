@@ -24,17 +24,17 @@ parser.add_argument('--protein_out', nargs='?', help="The file to write grouped 
 parser.add_delimited_file()
 parser.add_argument('-r', '--regex', help="A perl regular expression determining which parts of the header to capture.", type=str)
 parser.add_argument('--inferred-name', help="The name you want to assign for protein inference (in case you are regexing for gene names or something).", type=str, default='Proteins')
-parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_false', default=False)
+parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_false')
 group = parser.add_argument_group('iBAQ related options')
-group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true', default=False)
+group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true')
 group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", default=None)
 parser.add_enzyme()
-group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensity", action='store_false', default=True)
+group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensity", action='store_false')
 protein_group = parser.add_argument_group('Protein Grouping Options')
-protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true', default=False)
-protein_group.add_argument('--position', help="Write the position of the peptide matches.", action='store_true', default=False)
-protein_group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true', default=False)
-protein_group.add_argument('--modification-site', help="Write the position in the parent protein of the modification (requires case-sensitive and modifications being lower-cased).", action='store_true', default=False)
+protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true')
+protein_group.add_argument('--position', help="Write the position of the peptide matches.", action='store_true')
+protein_group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true')
+protein_group.add_argument('--modification-site', help="Write the position in the parent protein of the modification (requires case-sensitive and modifications being lower-cased).", action='store_true')
 
 
 global protein_sequences
@@ -73,7 +73,7 @@ def main():
     out_file = args.out
     header_lines = args.header
     delimiter = args.delimiter
-    inference = not args.no_inference
+    inference = args.no_inference
     inferred_name = args.inferred_name
     digest_min = args.min
     digest_max = args.max
