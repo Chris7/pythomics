@@ -58,10 +58,9 @@ class FastaIterator(templates.GenericIterator):
             try:
                 row = self.fasta_file.next()
             except StopIteration:
-                return header,seq
+                return header, seq
         self.row = row
-        if header and seq:
-            return header,seq
+        return header, seq
         
     def open_fasta_index(self):
         """
