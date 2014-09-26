@@ -15,8 +15,8 @@ from pythomics.templates import CustomParser
 parser = CustomParser(description = description)
 parser.add_fasta()
 parser.add_out()
-parser.add_enzyme(help="Enzyme to use. Pass a command separated list (no spaces); "
-                    "the order of enzymes will be the order of digestion if digesting in series.")
+parser.add_enzyme(help="Enzyme to use. Pass a list like \"trypsin lysc\" to use multiple enzymes.  "
+                    "The order of enzymes will be the order of digestion if digesting in series.")
 parser.add_argument('--parallel', help="Should cleavages be done in parallel (default is serial digestion)?", action='store_true')
 
 
@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
     digest_min = args.min
     digest_max = args.max
-    enzymes = args.enzyme.split(',')
+    enzymes = args.enzyme
     peptides_found = {}
     retained = {}
     total = 0
