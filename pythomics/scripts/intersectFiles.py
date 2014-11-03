@@ -9,6 +9,7 @@ perform various operations on the found entries in the alternative file
 
 import argparse, sys, re, csv, copy, decimal
 from pythomics.templates import CustomParser
+from pythomics.utils import ColumnFunctions
 import pythomics.proteomics.config as config
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
@@ -23,82 +24,6 @@ parser.add_argument('--function', help='The function to apply to found entries.'
 parser.add_argument('--colname', help='The column name to give the new appended value. Defaults to function chosen', type=str, default='')
 parser.add_argument('--aregex', help='An optional regex pattern for matching columns in file a.', type=str, default='')
 parser.add_argument('--bregex', help='An optional regex pattern for matching columns in file b.', type=str, default='')
-
-class CorrelateFunctions(object):
-    strict = False
-
-    def __init__(self, parser_args):
-        if parser_args.strict:
-            self.strict = True
-
-    def process_list(self, l):
-        if self.strict:
-            try:
-                l = [float(i) for i in l if i != '']
-            except ValueError:
-                sys.stderr.write('Invalid entry found in list %s.\n'%l)
-                raise ValueError
-        else:
-            nl = []
-            for i in l:
-                try:
-                    nl.append(float(i))
-                except ValueError:
-                    pass
-            l = nl
-        return l
-
-    def concat(self, l):
-        if not len(l):
-            return 'NA'
-        return ';'.join([str(i) for i in l])
-
-    def mean(self, l):
-        if not len(l):
-            return 'NA'
-        l = self.process_list(l)
-        return sum(l)/float(len(l))
-
-    def median(self, l):
-        if not len(l):
-            return 'NA'
-        elif len(l) == 1:
-            return l[0]
-        l = self.process_list(l)
-        l_sorted = sorted(l)
-        mid = len(l_sorted)/2
-        if len(l_sorted)%2:
-            # odd
-            return l_sorted[mid]
-        else:
-            return self.mean(l_sorted[mid-1:mid+1])
-
-    def var(self, l):
-        if not len(l):
-            return 'NA'
-        elif len(l) == 1:
-            return 0
-        l = self.process_list(l)
-        sample_mean = self.mean(l)
-        dev = 0
-        for x in l:
-            dev += (x - sample_mean)*(x - sample_mean)
-        return dev/(len(l)-1)
-
-    def std(self, l):
-        if not len(l):
-            return 'NA'
-        elif len(l) == 1:
-            return 0
-        l = self.process_list(l)
-        import math
-        return math.sqrt(self.var(l))
-
-    def sum(self, l):
-        if not len(l):
-            return 'NA'
-        l = self.process_list(l)
-        return sum(l)
 
 def main():
     args = parser.parse_args()
@@ -121,7 +46,7 @@ def main():
     b_header_lines = args.bheader
     a_delimiter = args.adelim
     b_delimiter = args.bdelim
-    correlator = CorrelateFunctions(args)
+    correlator = ColumnFunctions(args)
     try:
         b_lookup = int(args.blookup)
         b_lookup = b_lookup-1 if b_lookup > 0 else b_lookup
@@ -158,7 +83,10 @@ def main():
                 try:
                     b_vals[entry[b_column]].append(entry[b_lookup])
                 except KeyError:
-                    b_vals[entry[b_column]] = [entry[b_lookup]]
+                    try:
+                        b_vals[entry[b_column]] = [entry[b_lookup]]
+                    except IndexError:
+                        pass
                 except IndexError:
                     pass
     with args.out as o:

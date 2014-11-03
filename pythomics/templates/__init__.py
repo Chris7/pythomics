@@ -106,6 +106,20 @@ class CustomParser(argparse.ArgumentParser):
         self.add_argument('--individual', help="The Individual to use.", type=int, default=1)
         self.add_argument('--append-chromosome', help="Should 'chr' be appended to the chromosome column?.", action='store_true')
 
+    def add_bam(self, help="The SAM/BAM file to use"):
+        self.add_argument('--bam', help=help, type=str)
+
+    def add_bam_out(self):
+        self.add_argument('--out-bam', type=str)
+
+    def add_gff(self):
+        gff_group = self.add_argument_group('GFF file related options')
+        gff_group.add_argument('--gff', help="The GFF file to use.", type=argparse.FileType('r'), required=True)
+        gff_group.add_argument('--group-on', help="The key to group entries together by (such as transcript_id)", type=str, default='ID')
+        gff_group.add_argument('--feature', help="The feature to use for fetching coordinates (such as CDS, does not apply with cufflinks flag).", type=str, default='')
+        gff_group.add_argument('--cufflinks', help="If the gff file is in the standard cufflinks output", action='store_true')
+        return gff_group
+
     def add_argument_group(self, *args, **kwargs):
         group = argparse._ArgumentGroup(self, *args, **kwargs)
         self._action_groups.append(group)
