@@ -25,7 +25,13 @@ parser.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (
 
 def main():
     args = parser.parse_args()
-    peptide_column = args.col-1 if args.col > 0 else args.col
+    peptide_colname = False
+    try:
+        peptide_column = int(args.col)
+        peptide_column = peptide_column-1 if peptide_column > 0 else peptide_column
+    except ValueError:
+        peptide_colname = True
+        peptide_column = args.col
     tsv_file = args.tsv
     header_lines = args.header
     delimiter = args.delimiter
@@ -40,6 +46,11 @@ def main():
         for line_num, entry in enumerate(reader):
             if line_num < header_lines:
                 headers.append(entry)
+                if peptide_colname:
+                    for i, v in enumerate(entry):
+                        if v.lower() == peptide_column.lower():
+                            peptide_column = i
+                            break
             else:
                 peptide = entry[peptide_column]
                 if not case_sens:
