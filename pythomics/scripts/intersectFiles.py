@@ -20,7 +20,7 @@ parser.add_delimited_file(files=['-b'], delimiter=['--bdelim'], cols=['--bcol'],
 parser.add_argument('--blookup', help='The column to take entries from in file b.', type=str, default=1)
 parser.add_argument('--strict', help='For numeric operations, fail if types are incorrect (converting NA to a float for instance).', action='store_true')
 parser.add_out()
-parser.add_argument('--function', help='The function to apply to found entries.', choices=['concat', 'mean', 'sum', 'median', 'var', 'std'], type=str, default='concat')
+parser.add_argument('--function', help='The function to apply to found entries.', choices=['concat', 'mean', 'sum', 'median', 'var', 'std', 'count'], type=str, default='concat')
 parser.add_argument('--colname', help='The column name to give the new appended value. Defaults to function chosen', type=str, default='')
 parser.add_argument('--aregex', help='An optional regex pattern for matching columns in file a.', type=str, default='')
 parser.add_argument('--bregex', help='An optional regex pattern for matching columns in file b.', type=str, default='')

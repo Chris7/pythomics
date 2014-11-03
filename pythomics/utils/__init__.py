@@ -79,3 +79,7 @@ class ColumnFunctions(object):
             return 'NA'
         l = self.process_list(l)
         return sum(l)
+    
+    def count(self, l):
+        l = self.process_list(l)
+        return len(l)
