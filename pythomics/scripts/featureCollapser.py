@@ -14,13 +14,17 @@ from pythomics.templates import CustomParser
 import pythomics.proteomics.config as config
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
+from pythomics.utils import ColumnFunctions
 
 parser = CustomParser(description = description)
 parser.add_delimited_file()
 parser.add_out()
 parser.add_argument('--substring', help='If set, merge features by partial matches (such as collapsing peptides into larger peptides)', action='store_true')
-parser.add_argument('--merge-columns', help="If set, columns of merged peptides will be combined.", action='store_true')
-parser.add_argument('--merge-delimiter', help='The delimiter for column merges.', type=str, default=';')
+parser.add_argument('--mod-col', help="The column to apply a function to (if you want to combine fields, sum fields, etc.).", type=str)
+parser.add_argument('--mod-col-func', help="The function to apply to grouped entries in modification columns.", type=str, default='concat')
+parser.add_argument('--strict', help='For numeric operations, fail if types are incorrect (converting NA to a float for instance).', action='store_true')
+# parser.add_argument('--merge-columns', help="If set, columns of merged peptides will be combined.", action='store_true')
+# parser.add_argument('--merge-delimiter', help='The delimiter for column merges.', type=str, default=';')
 parser.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true')
 
 def main():
@@ -36,8 +40,11 @@ def main():
     header_lines = args.header
     delimiter = args.delimiter
     peptide_join = args.substring
-    col_delimiter = args.merge_delimiter
-    merge_columns = args.merge_columns
+    col_func = ColumnFunctions(args)
+    mod_col = int(args.mod_col)-1 if args.mod_col else False
+    mod_col_func = getattr(col_func, args.mod_col_func, col_func.concat)
+    # col_delimiter = args.merge_delimiter
+    # merge_columns = args.merge_columns
     case_sens = args.case_sensitive
     peptide_history = {}
     headers = []
@@ -83,7 +90,7 @@ def main():
                 matching_peptide = peptide_keys[peptide_string.count('\n', 0, first_match)]
             else:
                 matching_peptide = peptide_keys[first_match]
-            if merge_columns:
+            if mod_col:
                 if isinstance(peptide_history[peptide], list):
                     peptide_history[matching_peptide] += peptide_history[peptide]
                 else:
@@ -97,7 +104,7 @@ def main():
             # print peptide
             if not index%1000:
                 sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
-            if merge_columns:
+            if mod_col:
                 entry = []
                 for peptide_index, peptide_info in enumerate(entries):
                     for i, v in enumerate(peptide_info):
@@ -105,7 +112,7 @@ def main():
                             entry.append([v])
                         else:
                             entry[i].append(v)
-                entry_string = [col_delimiter.join(v) if i != peptide_column else v[0] for i, v in enumerate(entry)]
+                entry_string = [mod_col_func(v) if i == mod_col else v[0] for i, v in enumerate(entry)]
             else:
                 entry_string = entries[0]
 
