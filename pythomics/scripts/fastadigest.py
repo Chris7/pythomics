@@ -25,6 +25,7 @@ def main():
     args = parser.parse_args()
     file_name = args.fasta
     enzyme_choice = args.enzyme
+    enzyme_pattern = args.enzyme_pattern
     digest_type = args.type
     digest_frame = args.frame
     digest_negative = False
@@ -47,7 +48,10 @@ def main():
         sys.stderr.write("Nucleotide digestions must specify the frame.\n")
         return 1
     fasta_file = fasta.FastaIterator(file_name)
-    enzyme = digest.Enzyme( enzyme=enzyme_choice )
+    if enzyme_pattern:
+        enzyme = digest.Enzyme(pattern=enzyme_pattern)
+    elif enzyme_choice:
+        enzyme = digest.Enzyme(enzyme=enzyme_choice)
     with args.out as o:
         if digest_type == 'nt':
             for header, sequence in fasta_file:
