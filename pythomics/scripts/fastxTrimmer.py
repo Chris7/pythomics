@@ -19,6 +19,9 @@ parser.add_argument('--prefix', help="If using paired reads, this is the filenam
 parser.add_argument('--quality', help='If provided, remove qualities below a given score.', type=int, default=0)
 parser.add_argument('--chunk', help='How many reads to submit to each core.', type=int, default=1000)
 parser.add_argument('--no-gzip', help='To disable compression with gzip.', action='store_false')
+# parser.add_argument('--5partial-match', help='This will trim partial matches at the 3\' end of the sequence if there is a match of at least x nucleotides.', type=int, default=0)
+# parser.add_argument('--seed-length', help='The seed length for a match.', type=int, default=0)
+# parser.add_argument('--mismatches', help='The number of possible mismatches in a sequence.', type=int, default=3)
 
 start_trim = re.compile(r'^N+')
 end_trim = re.compile(r'N+$')
