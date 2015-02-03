@@ -62,9 +62,10 @@ class CustomParser(argparse.ArgumentParser):
         super(CustomParser, self).__init__(*args, **kwrds)
         self.add_argument('-p', help="Threads to run", type=int, default=1)
 
-    def add_enzyme(self, help="The enzyme to cleave with. Also valid is a cleavage pattern such as [KR]|{P}."):
+    def add_enzyme(self, help="The enzyme to cleave with."):
         self.add_argument('--enzyme', help=help, nargs='+',
                           choices=protein_config.ENZYMES.keys(), type=str, default='trypsin')
+        self.add_argument('--enzyme-pattern', help='A regex cleavage pattern such as [KR]|{P} to cleave proteins with.', type=str)
         self.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
         self.add_argument('--max', help="Maximum cleavage length", type=int, default=30)
 
