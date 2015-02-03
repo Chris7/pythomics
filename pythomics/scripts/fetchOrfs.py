@@ -17,6 +17,8 @@ parser.add_fasta()
 parser.add_out()
 parser.add_argument('--min', help="Minimum ORF length in amino acids.", type=int, default=50)
 parser.add_argument('--both-strands', help="Search both strands for ORFs.", action='store_true')
+parser.add_argument('--no-met-start', help="Output ORFs starting with amino acids other than MET", action='store_true')
+parser.add_argument('--from-met', help="Truncate leading amino acids up to MET", action='store_true')
 
 def main():
     args = parser.parse_args()
@@ -24,6 +26,8 @@ def main():
     orf_min = args.min
     fasta_file = fasta.FastaIterator(file_name)
     negative_strand = args.both_strands
+    no_met = args.no_met_start
+    from_met = args.from_met
     with args.out as o:
         for header, sequence in fasta_file:
             for i in xrange(3):
@@ -31,13 +35,22 @@ def main():
                 translation = fasta._translate(sequence[i:])
                 translation = translation.split('*')
                 for protein_index,protein_sequence in enumerate(translation):
-                    if len(protein_sequence) >= orf_min and protein_sequence[0] == 'M':
+                    if from_met:
+                        pos = protein_sequence.find('M')
+                        if pos == -1:
+                            continue
+                        protein_sequence = protein_sequence[pos:]
+                    if len(protein_sequence) >= orf_min and (no_met or protein_sequence[0] == 'M'):
                         o.write('>%s F:%s%d Orf:%d\n%s\n' % (header,strand,i+1,protein_index+1,protein_sequence))
                 if negative_strand:
                     strand = '-'
                     translation = fasta._translate(fasta._reverse_complement(sequence)[i:])
                     for protein_index,protein_sequence in enumerate(translation):
-                        if len(protein_sequence) >= orf_min and protein_sequence[0] == 'M':
+                        pos = protein_sequence.find('M')
+                        if pos == -1:
+                            continue
+                        protein_sequence = protein_sequence[pos:]
+                        if len(protein_sequence) >= orf_min and (no_met or protein_sequence[0] == 'M'):
                             o.write('>%s F:%s%d Orf:%d\n%s\n' % (header,strand,i+1,protein_index+1,protein_sequence))
 
 if __name__ == "__main__":
