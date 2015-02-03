@@ -504,3 +504,7 @@ class GFFFeature(object):
         """
         for i in self.features:
             yield i
+
+    def __str__(self):
+        rep = [str(i) for i in self.parts()]
+        return '\n'.join(rep)
