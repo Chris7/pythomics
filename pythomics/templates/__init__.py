@@ -12,7 +12,8 @@ class GenericIterator(object):
     UNCONSUMED = ''
     contents = []
 
-    def __init__(self, filename, **kwrds):
+    def __init__(self, filename, delimiter='\n', **kwrds):
+        self.delimiter = delimiter
         if isinstance(filename, basestring) and filename.endswith('.gz'):
             self.gz = True
             self.filename = gzip.GzipFile(filename)
@@ -39,14 +40,14 @@ class GenericIterator(object):
                 if self.UNCONSUMED:
                     return self.UNCONSUMED
                 raise StopIteration
-            if new_contents and new_contents[-1] != '\n':
-                new_uc_index = new_contents.rfind('\n')+1
+            if new_contents and new_contents[-1] != self.delimiter:
+                new_uc_index = new_contents.rfind(self.delimiter)+1
                 new_unconsumed = new_contents[new_uc_index:]
                 new_contents = new_contents[:new_uc_index]
             else:
                 new_unconsumed = ''
             new_contents = self.UNCONSUMED+new_contents
-            self.contents = new_contents.split('\n')
+            self.contents = new_contents.split(self.delimiter)
             self.contents = filter(None, self.contents)
             self.UNCONSUMED = new_unconsumed
             self.contents = deque(self.contents)
