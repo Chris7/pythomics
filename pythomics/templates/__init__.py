@@ -14,12 +14,6 @@ class GenericIterator(object):
 
     def __init__(self, filename, **kwrds):
         if isinstance(filename, basestring) and filename.endswith('.gz'):
-            # if spawn.find_executable('zcat'):
-            #     import subprocess
-            #     p = subprocess.Popen(['zcat', filename])
-            #     from cStringIO import StringIO
-            #     self.filename = StringIO(p.communicate()[0])
-            # else:
             self.gz = True
             self.filename = gzip.GzipFile(filename)
         elif isinstance(filename, basestring):
@@ -35,7 +29,7 @@ class GenericIterator(object):
 
     def __iter__(self):
         return self
-    
+
     def next(self):
         if self.gz:
             if self.contents:
@@ -43,8 +37,6 @@ class GenericIterator(object):
             new_contents = self.filename.read(self.CHUNK_SIZE)
             if not new_contents:
                 if self.UNCONSUMED:
-                    uc = self.UNCONSUMED
-                    self.UNCONSUMED = ''
                     return self.UNCONSUMED
                 raise StopIteration
             if new_contents and new_contents[-1] != '\n':
@@ -55,10 +47,13 @@ class GenericIterator(object):
                 new_unconsumed = ''
             new_contents = self.UNCONSUMED+new_contents
             self.contents = new_contents.split('\n')
+            self.contents = filter(None, self.contents)
             self.UNCONSUMED = new_unconsumed
             self.contents = deque(self.contents)
+            if self.contents:
+                return self.contents.popleft()
         else:
-            return self.filename.next()
+            return self.filename.next().strip()
 
 
 class CustomParser(argparse.ArgumentParser):
