@@ -7,12 +7,9 @@ This script will lookup features from one delimited file in another delimited fi
 perform various operations on the found entries in the alternative file
 """
 
-import argparse, sys, re, csv, copy, decimal
+import sys, csv
 from pythomics.templates import CustomParser
 from pythomics.utils import ColumnFunctions
-import pythomics.proteomics.config as config
-import pythomics.proteomics.digest as digest
-import pythomics.parsers.fasta as fasta
 
 parser = CustomParser(description = description)
 parser.add_delimited_file(files=['-a'], delimiter=['--adelim'], cols=['--acol'], header=['--aheader'], help="This is the file to lookup values from.")

@@ -48,9 +48,37 @@ class GenericProteomicIterator(object):
     def getBaseTrace(self):
         pass
 
+    def getPeptide(self, peptide=None):
+        pass
+
+class GuessIterator(templates.GenericIterator):
+    def __init__(self, *args, **kwargs):
+        super(GuessIterator, self).__init__(*args, **kwargs)
+        filename = self.filename.name.lower()
+        if '.mzml' in filename:
+            self.parser = MZMLIterator
+        elif 'pepxml' in filename:
+            self.parser = PepXMLIterator
+        elif '.xml' in filename:
+            self.parser = XTandemXMLIterator
+        elif '.mgf' in filename:
+            self.parser = MGFIterator
+        elif '.dat' in filename:
+            self.parser = MascotDATIterator
+        elif '.msf' in filename:
+            self.parser = ThermoMSFIterator
+        self.parser = self.parser(*args, **kwargs)
+        private = {'__iter__',}
+        for i in dir(self.parser):
+            if i.startswith('__') and i not in private:
+                continue
+            setattr(self, i, getattr(self.parser, i))
+
+    def next(self):
+        return self.parser.next()
 
 class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
-    def __init__(self, filename):
+    def __init__(self, filename, full=False, store=True):
         """An iterator over the mzML file format.
          I just need a parser right now so the specs might not be exactly correct
 
@@ -59,6 +87,8 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         """
         super(MZMLIterator, self).__init__(filename)
         self.scans = {}
+        self.store = store
+        self.full = full
         if isinstance(self.filename, gzip.GzipFile):
             self.gzip = True
         else:
@@ -134,6 +164,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.charge = charge
             scanObj.title = dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
             scanObj.rt = float(rt)
+            spectra.clear()
             return scanObj
         elif spectra.tag == '{0}chromatogramList'.format(namespace):
             spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}chromatogram/{0}cvParam'.format(namespace))])
@@ -147,6 +178,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             chromObj.times = time_array
             chromObj.intensities = intensities
             self.chromatogram = chromObj
+            spectra.clear()
             return None
         # elif spect:
         #     raise StopIteration
@@ -158,11 +190,11 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             raise StopIteration
         if self.gzip:
             scan = self.parselxml(spectra, full=True)
-            if isinstance(scan, ScanObject):
+            if self.store and isinstance(scan, ScanObject):
                 self.scans[scan.title] = scan
             return scan
         else:
-            return self.parselxml(spectra[1])
+            return self.parselxml(spectra[1], full=self.full)
 
     def getChromatogram(self):
         return self.chromatogram
@@ -857,7 +889,10 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
         return None
 
 class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
-    def __init__(self, filename, clvl=3,srank=1):
+    def __init__(self, filename, clvl=3, srank=1, full=False, store=False):
+        self.clvl = clvl
+        self.full = full
+        self.srank = srank
         if isinstance(filename,(str,unicode)):
             self.f = open(filename, 'rb')
         else:
@@ -877,8 +912,10 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.cur.execute(sql)
         self.modTable = {}
         self.scans = []
+        self.scanTable = {}
         for i in self.cur.fetchall():
             self.modTable[i[0]] = (i[1],i[2])
+        self.aaTable = dict([(i[0],i[1]) for i in self.conn.execute("select aa.AminoAcidID, aa.OneLetterCode from aminoacids aa").fetchall()])
         #We fetch all modifications here for temporary storage because it is VERY expensive to query peptide by peptide (3 seconds per 100 on my 500 MB test file, with 300,000 scans that's horrid)
         sql = 'select pam.PeptideID, GROUP_CONCAT(pam.AminoAcidModificationID), GROUP_CONCAT(pam.Position) from peptidesaminoacidmodifications pam GROUP BY pam.PeptideID'
         self.cur.execute(sql)
@@ -889,7 +926,10 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d'%(clvl,srank)
             self.nrows = self.conn.execute(sql).fetchone()[0]
             #sql = 'select sp.spectrum,p.ConfidenceLevel,p.SearchEngineRank,p.Sequence,p.PeptideID,pp.ProteinID,p.SpectrumID from spectra sp left join peptides p on (p.SpectrumID=sp.UniqueSpectrumID) left join peptidesproteins pp on (p.PeptideID=pp.PeptideID) where p.PeptideID IS NOT NULL'
-            sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d GROUP BY p.SpectrumID'%(clvl,srank)
+            if full:
+                sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID, sp.Spectrum from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d GROUP BY p.SpectrumID'%(clvl,srank)
+            else:
+                sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d GROUP BY p.SpectrumID'%(clvl,srank)
             self.cur.execute(sql)
         except sqlite3.OperationalError:
             sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d'%clvl
@@ -899,6 +939,19 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             self.cur.execute(sql)
         self.index = 0
         self.master_scans = {}
+
+    def getSILACLabels(self):
+        sql = "select pnp.ParameterValue from processingnodeparameters pnp where pnp.ValueDisplayString like 'Label%' and pnp.ParameterValue like '%#%'"
+        masses = {}
+        entries = self.conn.execute(sql).fetchall()
+        for i in entries:
+            entry = i[0].split('#')
+            mod = int(entry.pop())
+            mod_mass = self.modTable[mod][1]
+            for aa_id in entry:
+                aa = self.aaTable[int(aa_id)]
+                masses[aa] = mod_mass
+        return masses
 
     def loadChromatogram(self):
         sql = 'select * from chromatograms'
@@ -943,60 +996,38 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         i = self.cur.fetchone()
         if not i:
             return None
-        return self.parseFullScan(i)
+        scan = self.parseFullScan(i)
+        scan.spectrumId = specId
+        return scan
 
-    def __iter__(self):
-        return self
-
-    def parseScan(self, i):
-#sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel = 1 and p.SearchEngineRank = 1 GROUP BY p.SpectrumID'
-        objs = []
-        self.index+=1
-        added = set([])#for some reason redundant scans appear
-        for confidence, searchRank, sequence, pepId in zip(i[0].split(','),i[1].split(','),i[2].split(','),i[3].split(',')):
-            if (sequence,pepId) in added:
-                continue
-            else:
-                added.add((sequence,pepId))
-            scanObj = PeptideObject()
+    def getScans(self, modifications=True, fdr=True):
+        """
+        get a random scan
+        """
+        if fdr:
+            sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) WHERE p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d" % (self.clvl, self.srank)
             try:
-                mods = self.mods[int(pepId)]
-                # print mods
-                for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
-                    modEntry = self.modTable[int(modId)]
-                    scanObj.addModification(sequence[int(modPosition)], modPosition, modEntry[1], modEntry[0])
-            except KeyError:
-                pass
-            scanObj.peptide = sequence
-            scanObj.rank = searchRank
-            scanObj.confidence = confidence
-            scanObj.acc = i[4]
-            scanObj.charge = i[6]
-            scanObj.rt = i[7]
-            fName = self.sFileMap[i[10]]
-            fScan = i[8]
-            lScan = i[9]
-            sid = '%s.%s.%s'%(fName, fScan,lScan)
-            scanObj.title = sid
-            scanObj.id = sid
-            scanObj.spectrumId=i[5]
-            objs.append(scanObj)
-        return objs
+                self.cur.execute(sql)
+            except sqlite3.OperationalError:
+                sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) WHERE p.ConfidenceLevel >= %d" % self.clvl
+                self.cur.execute(sql)
+        else:
+            sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID)"
+            self.cur.execute(sql)
+        while True:
+            results = self.cur.fetchmany(1000)
+            if not results:
+                break
+            for tup in results:
+                scan = self.parseFullScan(tup, modifications=modifications)
+                scan.spectrumId = tup[3]
+                yield scan
+        yield None
 
-    def parseFullScan(self, i):
-        """
-        parses scan info for giving a Spectrum Obj for plotting. takes significantly longer since it has to unzip/parse xml
-        """
-        scanObj = PeptideObject()
-        sInfo = i[0]
+    def decompressScanInfo(self, scanObj, zip):
+        sInfo = zip
         fp = StringIO.StringIO(sInfo)
         zf = zipfile.ZipFile(fp, 'r')
-        peptide = str(i[1])
-        pid=i[2]
-        sql = 'select aam.ModificationName,pam.Position,aam.DeltaMass from peptidesaminoacidmodifications pam left join aminoacidmodifications aam on (aam.AminoAcidModificationID=pam.AminoAcidModificationID) where pam.PeptideID=%s'%pid
-        for row in self.conn.execute(sql):
-            scanObj.addModification(peptide[row[1]], str(row[1]), str(row[2]), row[0])
-        scanObj.peptide = peptide
         for j in zf.namelist():
             msInfo = zf.read(j)
             msStr = msInfo.split('\n')
@@ -1015,6 +1046,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         scanIndex = finfo.index(' ScanNumber=')+1
                         sid = '%s.%s.%s'%(fName, finfo[scanIndex],finfo[scanIndex])
                         #sid = '%s.%s.%s'%(fName, finfo[2],finfo[2])
+                        scanObj.file = fName
                         scanObj.title = sid
                         scanObj.id = sid
                         scanObj.rt = float(finfo[7])
@@ -1058,9 +1090,59 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                 master_scanobj.scans += ms1_scans
                 master_scanobj.scans.sort(key=lambda x: x[0])
                 scanObj.ms1_scan = master_scanobj
+            return True
+        return False
+
+    def parseScan(self, i, modifications=True, full=False):
+#sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel = 1 and p.SearchEngineRank = 1 GROUP BY p.SpectrumID'
+        objs = []
+        self.index+=1
+        added = set([])#for some reason redundant scans appear
+        for confidence, searchRank, sequence, pepId in zip(i[0].split(','),i[1].split(','),i[2].split(','),i[3].split(',')):
+            if (sequence,pepId) in added:
+                continue
+            else:
+                added.add((sequence,pepId))
+            scanObj = PeptideObject()
+            try:
+                mods = self.mods[int(pepId)]
+                # print mods
+                for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
+                    modEntry = self.modTable[int(modId)]
+                    scanObj.addModification(sequence[int(modPosition)], modPosition, modEntry[1], modEntry[0])
+            except KeyError:
+                pass
+            scanObj.peptide = sequence
+            scanObj.rank = searchRank
+            scanObj.confidence = confidence
+            scanObj.acc = i[4]
+            scanObj.charge = i[6]
+            scanObj.rt = i[7]
+            fName = self.sFileMap[i[10]]
+            fScan = i[8]
+            lScan = i[9]
+            sid = '%s.%s.%s'%(fName, fScan,lScan)
+            scanObj.title = sid
+            scanObj.id = sid
+            scanObj.spectrumId=i[5]
+            objs.append(scanObj)
+        return objs
+
+    def parseFullScan(self, i, modifications=True):
+        """
+        parses scan info for giving a Spectrum Obj for plotting. takes significantly longer since it has to unzip/parse xml
+        """
+        scanObj = PeptideObject()
+        peptide = str(i[1])
+        pid=i[2]
+        if modifications:
+            sql = 'select aam.ModificationName,pam.Position,aam.DeltaMass from peptidesaminoacidmodifications pam left join aminoacidmodifications aam on (aam.AminoAcidModificationID=pam.AminoAcidModificationID) where pam.PeptideID=%s'%pid
+            for row in self.conn.execute(sql):
+                scanObj.addModification(peptide[row[1]], str(row[1]), str(row[2]), row[0])
+        scanObj.peptide = peptide
+        if self.decompressScanInfo(scanObj, i[0]):
             return scanObj
-        else:
-            return None
+        return None
 
     def next(self):
         if not self.scans:
@@ -1073,7 +1155,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                     self.scans = self.master_scans
                 else:
                     raise StopIteration
-            self.scans = self.parseScan(i)
+            self.scans = self.parseScan(i, full=self.full)
             if not self.scans:
                 if self.master_scans:
                     if isinstance(self.master_scans, dict):
@@ -1089,3 +1171,9 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
 
     def getProgress(self):
         return self.index*100/self.nrows
+
+    def getPeptide(self, peptide=None):
+        sql = "select sp.Spectrum, p.Sequence, p.PeptideID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) where p.Sequence = '%s'"%(peptide)
+        self.cur.execute(sql)
+        for i in self.cur.fetchall():
+            yield self.parseFullScan(i)
