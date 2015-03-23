@@ -65,7 +65,7 @@ class GuessIterator(templates.GenericIterator):
             self.parser = MGFIterator
         elif '.dat' in filename:
             self.parser = MascotDATIterator
-        elif '.msf' in filename:
+        elif '.msf' in filename or '.pdresult' in filename:
             self.parser = ThermoMSFIterator
         self.parser = self.parser(*args, **kwargs)
         private = {'__iter__',}
@@ -78,7 +78,7 @@ class GuessIterator(templates.GenericIterator):
         return self.parser.next()
 
 class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
-    def __init__(self, filename, full=False, store=True):
+    def __init__(self, filename, full=False, store=True, ms_filter=False, start=0):
         """An iterator over the mzML file format.
          I just need a parser right now so the specs might not be exactly correct
 
@@ -89,6 +89,8 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         self.scans = {}
         self.store = store
         self.full = full
+        self.ms_filter = ms_filter
+        self.start = start
         if isinstance(self.filename, gzip.GzipFile):
             self.gzip = True
         else:
@@ -138,13 +140,6 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             return None
         elif spectra.tag == '{0}spectrum'.format(namespace):
             scanObj = ScanObject()
-            if full:
-                mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
-                mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
-                mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
-                intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
-                intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
-                scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
             spectra_info = dict(zip(spectra.keys(),spectra.values()))
             spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
             scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
@@ -153,17 +148,29 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             # print 'spectra params', spectra_params
             # print 'our scan info', scan_info
             # print 'our precursor info', precursor_info
-            ms_level = spectra_params.get('ms level', 0)
+            ms_level = int(spectra_params.get('ms level', 0))
             charge = precursor_info.get('charge state', 0)
             precursor_ion = precursor_info.get('selected ion m/z', 0)
             precursor_intensity = precursor_info.get('peak intensity', 0)
             rt = scan_info.get('scan start time', 0)
             rt_length = scan_info.get('ion injection time', 0)
-            scanObj.ms_level = int(ms_level)
+            scanObj.ms_level = ms_level
             scanObj.mass = float(precursor_ion)
             scanObj.charge = charge
-            scanObj.title = dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
+            title = dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
+            scanObj.title = title
             scanObj.rt = float(rt)
+            try:
+                title = int(title)
+            except:
+                pass
+            if title > self.start and self.ms_filter and ms_level==self.ms_filter and full:
+                mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
+                mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
+                mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
+                intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
+                intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
+                scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
             spectra.clear()
             return scanObj
         elif spectra.tag == '{0}chromatogramList'.format(namespace):
@@ -900,13 +907,29 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.conn = sqlite3.connect(filename, check_same_thread=False)
         #self.conn.row_factory = sqlite3.Row
         self.cur = self.conn.cursor()
-        sql = 'select * from fileinfos'
-        self.cur.execute(sql)
         self.fileMap = {}
         self.sFileMap = {}
-        for i in self.cur.fetchall():
-            self.fileMap[str(i[0])]=str(i[1])
-            self.sFileMap[i[0]]=lastSplit.search(i[1]).group(1)
+        try:
+            sql = 'select * from fileinfos'
+            self.cur.execute(sql)
+            self.version = 1
+            for i in self.cur.fetchall():
+                self.fileMap[str(i[0])]=str(i[1])
+                self.sFileMap[i[0]]=lastSplit.search(i[1]).group(1)
+        except sqlite3.OperationalError:
+            sql = 'select * from analysisdefinition'
+            self.cur.execute(sql)
+            self.version = 2
+            for i in self.cur.fetchall():
+                xml = i[1]
+                self.root = etree.fromstring(xml)
+            sql = 'select FileID, FileName from workflowinputfiles'
+            self.cur.execute(sql)
+            for i in self.cur.fetchall():
+                self.fileMap[str(i[0])]=str(i[1])
+                self.sFileMap[i[0]]=lastSplit.search(i[1]).group(1)
+
+
         #modification table
         sql = 'select a.AminoAcidModificationID,a.ModificationName, a.DeltaMass from aminoacidmodifications a'
         self.cur.execute(sql)
@@ -941,16 +964,24 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.master_scans = {}
 
     def getSILACLabels(self):
-        sql = "select pnp.ParameterValue from processingnodeparameters pnp where pnp.ValueDisplayString like 'Label%' and pnp.ParameterValue like '%#%'"
         masses = {}
-        entries = self.conn.execute(sql).fetchall()
-        for i in entries:
-            entry = i[0].split('#')
-            mod = int(entry.pop())
-            mod_mass = self.modTable[mod][1]
-            for aa_id in entry:
-                aa = self.aaTable[int(aa_id)]
-                masses[aa] = mod_mass
+        if self.version == 1:
+            sql = "select pnp.ParameterValue from processingnodeparameters pnp where pnp.ValueDisplayString like 'Label%' and pnp.ParameterValue like '%#%'"
+            entries = self.conn.execute(sql).fetchall()
+            for i in entries:
+                entry = i[0].split('#')
+                mod = int(entry.pop())
+                mod_mass = self.modTable[mod][1]
+                for aa_id in entry:
+                    aa = self.aaTable[int(aa_id)]
+                    masses[aa] = mod_mass
+        elif self.version == 2:
+            import HTMLParser
+            html_parser = HTMLParser.HTMLParser()
+            silac = etree.fromstring([i for i in self.root.iterdescendants('QuantitationMethod')][0].text.encode('utf-16'))
+            for mod_info in [etree.fromstring(html_parser.unescape(i.text)) for i in silac.iterdescendants('Parameter') if 'Modification Version' in i.text]:
+                for aa in mod_info.get('AminoAcids').split(','):
+                    masses[aa] = float(mod_info.get('DeltaMass'))
         return masses
 
     def loadChromatogram(self):
