@@ -128,9 +128,9 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         else:
             array = base64.b64decode(array)
         if '64-bit float' in params:
-            array = [struct.unpack('d', array[i:i+8])[0] for i in xrange(0,len(array),8)]
+            array = [struct.unpack('d', array[i:i+8])[0] for i in xrange(0, len(array), 8)]
         else:
-            array = [struct.unpack('f', array[i:i+4])[0] for i in xrange(0,len(array),4)]
+            array = [struct.unpack('f', array[i:i+4])[0] for i in xrange(0, len(array), 4)]
         return array
 
     def parselxml(self, spectra, full=False, namespace='{http://psi.hupo.org/ms/mzml}'):
@@ -140,7 +140,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             return None
         elif spectra.tag == '{0}spectrum'.format(namespace):
             scanObj = ScanObject()
-            spectra_info = dict(zip(spectra.keys(),spectra.values()))
+            # spectra_info = dict(zip(spectra.keys(),spectra.values()))
             spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
             scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
             precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursorList/{0}precursor/{0}selectedIonList/{0}selectedIon/{0}cvParam'.format(namespace))])
@@ -151,9 +151,9 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             ms_level = int(spectra_params.get('ms level', 0))
             charge = precursor_info.get('charge state', 0)
             precursor_ion = precursor_info.get('selected ion m/z', 0)
-            precursor_intensity = precursor_info.get('peak intensity', 0)
+            # precursor_intensity = precursor_info.get('peak intensity', 0)
             rt = scan_info.get('scan start time', 0)
-            rt_length = scan_info.get('ion injection time', 0)
+            # rt_length = scan_info.get('ion injection time', 0)
             scanObj.ms_level = ms_level
             scanObj.mass = float(precursor_ion)
             scanObj.charge = charge
