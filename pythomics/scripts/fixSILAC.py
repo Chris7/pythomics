@@ -44,6 +44,7 @@ parser.add_argument('--no-sparse', help="Don't store data as sparse entities. Ma
 parser.add_argument('--no-temp', help="This will disable saving of the intermediate files for SILAC analysis.", action='store_false')
 parser.add_argument('--debug', help="This will output debug information and graphs.", action='store_true')
 parser.add_argument('--skip', help="If true, skip scans with missing files in the mapping.", action='store_true')
+parser.add_argument('--peptide', help="The peptide to limit quantification to.", type=str)
 parser.add_out()
 
 class Worker(Process):
@@ -398,6 +399,8 @@ def main():
     for index, i in enumerate(results):
         if index%1000 == 0:
             sys.stderr.write('.')
+        if args.peptide and args.peptide.lower() != i.peptide.lower():
+            continue
         specId = i.spectrumId
         if specId in mass_scans:
             continue
