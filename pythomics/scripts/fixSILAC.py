@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 from __future__ import division
 
+# TODO: Threading for single files. Since much time is spent in fetching m/z records, it may be pointless
+# because I/O is limiting.
+
 description = """
 This will quantify the SILAC peaks in ms1 spectra. It relies solely on the distance between peaks instead of
  the heavy pattern following the light pattern, which can correct for errors due to amino acid conversions.
@@ -26,6 +29,7 @@ RESULT_ORDER = (('peptide', 'Peptide'), ('heavy', 'Heavy'), ('light', 'Light'), 
                 ('charge', 'Charge'), ('ms1', 'MS1 Spectrum ID'), ('scan', 'MS2 Spectrum ID'), ('light_precursor', 'Light Precursor M/Z'),
                 ('heavy_precursor', 'Heavy Precursor M/Z'),
                 ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'))
+
 
 parser = CustomParser(description=description)
 parser.add_processed_ms()
@@ -357,6 +361,8 @@ def main():
     hdf = args.mzml
     save_files = args.no_temp
     sparse = args.no_sparse
+
+
     hdf_filemap = {}
     if not hdf:
         hdf = os.path.abspath(os.path.split(source)[0])
@@ -366,8 +372,6 @@ def main():
         hdf_filemap[hdf] = os.path.abspath(hdf)
 
     results = GuessIterator(source, full=True, store=False)
-
-    labelParse = re.compile(r'([0-9\.]+),Label')
 
     mass_scans = {}
     msf_scan_index = {}
@@ -385,10 +389,6 @@ def main():
         for mod in i.mods:
             if 'Label' in mod[3]:
                 shift += float(mod[2])
-        # label = labelParse.search(i.getModifications())
-        # mass = float(label.group(1)) if label else 0.0
-        # if mass:
-        #     pass
         mass_scans[specId] = {'id': specId, 'peptide': i.peptide, 'mass_shift': shift, 'rt': i.rt, 'charge': i.charge, 'modifications': i.getModifications()}
 
     msf_scans = {}
