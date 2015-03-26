@@ -2,7 +2,8 @@
 from __future__ import division
 
 # TODO: Threading for single files. Since much time is spent in fetching m/z records, it may be pointless
-# because I/O is limiting.
+# because I/O is limiting. If so, create a thread just for I/O for processing requests the other threads
+# interface with
 
 description = """
 This will quantify the SILAC peaks in ms1 spectra. It relies solely on the distance between peaks instead of
@@ -28,7 +29,8 @@ from pythomics.proteomics.parsers import GuessIterator
 RESULT_ORDER = (('peptide', 'Peptide'), ('heavy', 'Heavy'), ('light', 'Light'), ('h_l', 'Heavy/Light'), ('modifications', 'Modifications'),
                 ('charge', 'Charge'), ('ms1', 'MS1 Spectrum ID'), ('scan', 'MS2 Spectrum ID'), ('light_precursor', 'Light Precursor M/Z'),
                 ('heavy_precursor', 'Heavy Precursor M/Z'),
-                ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'))
+                ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'), ('light_residuals', 'Light Intensity Residuals of Fit'),
+                ('heavy_residuals', 'Heavy Intensity Residuals of Fit'))
 
 
 parser = CustomParser(description=description)
@@ -225,16 +227,22 @@ class Worker(Process):
                     light_precursor = precursor-shift
                     heavy_precursor = precursor
 
+                quant = light_precursor != heavy_precursor
+
                 light = self.findEnvelope(df, start_mz=light_precursor, charge=charge, ppm=5)
-                heavy = self.findEnvelope(df, start_mz=heavy_precursor, charge=charge, ppm=5)
+
 
                 start_mzs = [df.index[i[0]] for i in light['micro_envelopes']]
                 end_mzs = [df.index[i[-1]] for i in light['micro_envelopes']]
                 light_clusters = len(start_mzs)
+                light_query = ' | '.join(['(index >= {0} & index <= {1})'.format(start, end) for start, end in zip(start_mzs, end_mzs)])
 
-                heavy_start_mzs = [df.index[i[0]] for i in heavy['micro_envelopes']]
-                heavy_end_mzs = [df.index[i[-1]] for i in heavy['micro_envelopes']]
-                heavy_clusters = len(heavy_start_mzs)
+                if quant:
+                    heavy = self.findEnvelope(df, start_mz=heavy_precursor, charge=charge, ppm=5)
+                    heavy_start_mzs = [df.index[i[0]] for i in heavy['micro_envelopes']]
+                    heavy_end_mzs = [df.index[i[-1]] for i in heavy['micro_envelopes']]
+                    heavy_clusters = len(heavy_start_mzs)
+                    heavy_query = ' | '.join(['(index >= {0} & index <= {1})'.format(start, end) for start, end in zip(heavy_start_mzs, heavy_end_mzs)])
 
                 # PLOTTING FOR DEBUG
 
@@ -256,28 +264,30 @@ class Worker(Process):
                             val_ind = df.index[j]
                             light_x.append(val_ind)
                             light_y.append(val)
-                    heavy_x = []
-                    heavy_y = []
-                    for i in heavy['micro_envelopes']:
-                        for j in xrange(i[0], i[1]+1):
-                            val = df.iloc[j]
-                            val_ind = df.index[j]
-                            heavy_x.append(val_ind)
-                            heavy_y.append(val)
+
+                    if quant:
+                        heavy_x = []
+                        heavy_y = []
+                        for i in heavy['micro_envelopes']:
+                            for j in xrange(i[0], i[1]+1):
+                                val = df.iloc[j]
+                                val_ind = df.index[j]
+                                heavy_x.append(val_ind)
+                                heavy_y.append(val)
                     ax = df.iloc[smz:j].to_dense().plot()
                     fig = ax.get_figure()
                     pdf.savefig(figure=fig)
                     pylab.figure()
-                    pylab.plot(light_x,light_y, color='b')
-                    ax = pylab.plot(heavy_x,heavy_y, color='r')
+                    ax = pylab.plot(light_x,light_y, color='b')
+                    if quant:
+                        pylab.plot(heavy_x,heavy_y, color='r')
                     fig = ax[0].get_figure()
                     pdf.savefig(figure=fig)
 
                 ####################
 
-                light_query = ' | '.join(['(index >= {0} & index <= {1})'.format(start, end) for start, end in zip(start_mzs, end_mzs)])
-                heavy_query = ' | '.join(['(index >= {0} & index <= {1})'.format(start, end) for start, end in zip(heavy_start_mzs, heavy_end_mzs)])
-                scan_query = ' | '.join([light_query, heavy_query])
+
+                scan_query = ' | '.join([light_query, heavy_query] if quant else [light_query])
                 try:
                     # use the RT to condense our search
                     scan_block = pd.concat([self.getScan(i, dense=False).dropna().to_frame().query(scan_query) for i in rt_index_map[rt-self.rt_width:rt+self.rt_width]], axis=1)
@@ -288,7 +298,8 @@ class Worker(Process):
 
                 light_data = scan_block.query(light_query).fillna(0).sum()
 
-                heavy_data = scan_block.query(heavy_query).fillna(0).sum()
+                if quant:
+                    heavy_data = scan_block.query(heavy_query).fillna(0).sum()
 
                 del scan_block
 
@@ -300,9 +311,11 @@ class Worker(Process):
 
                 X = light_data.index.values
 
+
                 mu = opt.x[0]
                 opt_std = opt.x[1]
                 opt_offset = opt.x[2]
+                light_residuals = opt.fun
                 fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
                 light_int = integrate.quad(fit, mu-6*opt_std, mu+6*opt_std)[0]
                 if self.debug:
@@ -313,34 +326,37 @@ class Worker(Process):
                     pylab.plot([mu, mu], [0, (amp-opt_offset)], color='r')
                     pdf.savefig(figure=ax.get_figure())
 
-                amp = heavy_data.max()
-                params = np.array([rt, 0.1, heavy_data.quantile([0.1]).iloc[0]])
+                if quant:
+                    amp = heavy_data.max()
+                    params = np.array([rt, 0.1, heavy_data.quantile([0.1]).iloc[0]])
 
-                opt = optimize.minimize(self.gfit, params, args=(heavy_data.index.values, heavy_data.values, amp, rt), method='Nelder-Mead',
-                                        options={'xtol': 1e-8})
+                    opt = optimize.minimize(self.gfit, params, args=(heavy_data.index.values, heavy_data.values, amp, rt), method='Nelder-Mead',
+                                            options={'xtol': 1e-8})
 
-                X = heavy_data.index.values
+                    X = heavy_data.index.values
 
-                mu = opt.x[0]
-                opt_std = opt.x[1]
-                opt_offset = opt.x[2]
-                fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
-                heavy_int = integrate.quad(fit, mu-6*opt_std, mu+6*opt_std)[0]
-                if self.debug:
-                    pylab.figure()
-                    ax = heavy_data.plot(color='b', title=str(heavy_int))
-                    pd.Series(dict(zip(X, fit(X)+opt_offset))).plot(color='r')
-                    pylab.plot([rt, rt], [0, (amp-opt_offset)], color='k')
-                    pylab.plot([mu, mu], [0, (amp-opt_offset)], color='r')
-                    pdf.savefig(figure=ax.get_figure())
-                    pdf.close()
+                    mu = opt.x[0]
+                    opt_std = opt.x[1]
+                    opt_offset = opt.x[2]
+                    heavy_residuals = opt.fun
+                    fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
+                    heavy_int = integrate.quad(fit, mu-6*opt_std, mu+6*opt_std)[0]
+                    if self.debug:
+                        pylab.figure()
+                        ax = heavy_data.plot(color='b', title=str(heavy_int))
+                        pd.Series(dict(zip(X, fit(X)+opt_offset))).plot(color='r')
+                        pylab.plot([rt, rt], [0, (amp-opt_offset)], color='k')
+                        pylab.plot([mu, mu], [0, (amp-opt_offset)], color='r')
+                        pdf.savefig(figure=ax.get_figure())
+                        pdf.close()
 
-                self.results.put({'peptide': peptide, 'heavy': heavy_int, 'light': light_int,
+                self.results.put({'peptide': peptide, 'heavy': heavy_int if quant else 'NA', 'light': light_int,
                                   'scan': scanId, 'light_clusters': light_clusters,
-                                  'h_l': heavy_int/light_int if light_int else 'NA',
-                                  'heavy_clusters': heavy_clusters, 'ms1': ms1,
+                                  'h_l': heavy_int/light_int if quant and light_int else 'NA',
+                                  'heavy_clusters': heavy_clusters if quant else 'NA', 'ms1': ms1,
                                   'charge': charge, 'modifications': mods, 'light_precursor': light_precursor,
-                                  'heavy_precursor': heavy_precursor})
+                                  'heavy_precursor': heavy_precursor if quant else 'NA',
+                                  'light_residuals': light_residuals, 'heavy_residuals': heavy_residuals if quant else 'NA'})
                 self.cleanScans(rt_index_map, rt)
             except:
                 sys.stderr.write('ERROR ON {0}\n{1}\n{2}\n'.format(ms1, scan_info, traceback.format_exc()))
