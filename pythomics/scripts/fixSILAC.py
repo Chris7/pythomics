@@ -22,6 +22,9 @@ from multiprocessing import Process, Queue
 from Queue import Empty
 from scipy import integrate, optimize
 from matplotlib.backends.backend_pdf import PdfPages
+from cStringIO import StringIO
+import urllib
+import base64
 
 from pythomics.templates import CustomParser
 from pythomics.proteomics.parsers import GuessIterator
@@ -29,7 +32,8 @@ from pythomics.proteomics.parsers import GuessIterator
 RESULT_ORDER = (('peptide', 'Peptide'), ('heavy', 'Heavy'), ('light', 'Light'), ('h_l', 'Heavy/Light'), ('modifications', 'Modifications'),
                 ('charge', 'Charge'), ('ms1', 'MS1 Spectrum ID'), ('scan', 'MS2 Spectrum ID'), ('light_precursor', 'Light Precursor M/Z'),
                 ('heavy_precursor', 'Heavy Precursor M/Z'),
-                ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'), ('light_residuals', 'Light Intensity Residuals of Fit'),
+                ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'), ('light_rt_dev', 'Light Retention Time Deviation'),
+                ('heavy_rt_dev', 'Heavy Retention Time Deviation'), ('light_residuals', 'Light Intensity Residuals of Fit'),
                 ('heavy_residuals', 'Heavy Intensity Residuals of Fit'), ('cluster_ratio_deviation', 'Deviation of Heavy Clusters From Light'))
 
 
@@ -45,10 +49,11 @@ parser.add_argument('--no-temp', help="This will disable saving of the intermedi
 parser.add_argument('--debug', help="This will output debug information and graphs.", action='store_true')
 parser.add_argument('--skip', help="If true, skip scans with missing files in the mapping.", action='store_true')
 parser.add_argument('--peptide', help="The peptide to limit quantification to.", type=str)
+parser.add_argument('--html', help="Output a HTML table summary.", action='store_true')
 parser.add_out()
 
 class Worker(Process):
-    def __init__(self, queue=None, results=None, precision=6, raw_name=None, heavy_masses=None, temp=False, sparse=False, debug=False):
+    def __init__(self, queue=None, results=None, precision=6, raw_name=None, heavy_masses=None, temp=False, sparse=False, debug=False, html=False):
         super(Worker, self).__init__()
         self.precision = precision
         self.sparse = sparse
@@ -60,10 +65,12 @@ class Worker(Process):
             self.heavy_masses = heavy_masses
         self.hydrogen = 1.00794
         self.raw_name = raw_name
+        self.filename = os.path.split(self.raw_name)[1]
         self.temp = temp
         self.rt_width = 1
-        self.rt_tol = 0.1 # for fitting
+        self.rt_tol = 0.2 # for fitting
         self.debug = debug
+        self.html = html
         sys.stderr.write('Thread spawned: Sparse: {0}\n'.format(self.sparse))
 
     def findMicro(self, df, pos):
@@ -158,12 +165,13 @@ class Worker(Process):
         gc.collect()
 
     def gfit(self, params, X, Y, amp, rt):
-        mu, std, offset = params[0], params[1], params[2]
+        #mu, std, offset = params[0], params[1], params[2]
+        mu, std = params[0], params[1]
         if abs(mu-rt) > self.rt_tol:
             return np.inf
-        fit = (amp-offset)*np.exp(-(X-mu)**2/(2*std**2))+offset
-        residuals = (fit-Y)**2
-        return sum(residuals)
+        fit = amp*np.exp(-(X-mu)**2/(2*std**2))
+        residuals = sum((fit-Y)**2)
+        return residuals
 
     def run(self):
         # first, load our series in
@@ -199,6 +207,7 @@ class Worker(Process):
         rt_index_map = pd.Series(rt_index_map)
         for params in iter(self.queue.get, None):
             try:
+                html_images = {}
                 start_time = time.time()
                 scan_info = params.get('scan_info')
                 scan = params.get('scan')
@@ -245,9 +254,10 @@ class Worker(Process):
 
                 # PLOTTING FOR DEBUG
 
-                if self.debug:
-                    pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
-                    pylab.figure()
+                if self.debug or self.html:
+                    if self.debug:
+                        pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
+                        pylab.figure()
 
                     light_x = []
                     light_y = []
@@ -275,15 +285,20 @@ class Worker(Process):
                                 heavy_y.append(val)
                     ax = df.iloc[smz:j].to_dense().plot()
                     fig = ax.get_figure()
-                    pdf.savefig(figure=fig)
+                    if self.debug:
+                        pdf.savefig(figure=fig)
+
                     pylab.figure()
                     ax = pylab.plot(light_x, light_y, color='b')
                     if quant:
-                        pylab.plot(heavy_x, heavy_y, color='r')
+                        ax = pylab.plot(heavy_x, heavy_y, color='r')
                     fig = ax[0].get_figure()
-                    pdf.savefig(figure=fig)
-
-                ####################
+                    if self.debug:
+                        pdf.savefig(figure=fig)
+                    if self.html:
+                        fname = os.path.join(self.html, '{2}_{0}_{1}_clusters.png'.format(peptide, ms1, self.filename))
+                        fig.savefig(fname, format='png', dpi=50)
+                        html_images['clusters'] = fname
 
 
                 scan_query = ' | '.join([light_query, heavy_query] if quant else [light_query])
@@ -303,7 +318,8 @@ class Worker(Process):
                 del scan_block
 
                 amp = light_data.max()
-                params = np.array([rt, 0.1, light_data.quantile([0.1]).iloc[0]])
+                #params = np.array([rt, 0.1, light_data.quantile([0.1]).iloc[0]])
+                params = np.array([rt, 0.1])
 
                 opt = optimize.minimize(self.gfit, params, args=(light_data.index.values, light_data.values, amp, rt), method='Nelder-Mead',
                                         options={'xtol': 1e-8})
@@ -312,22 +328,30 @@ class Worker(Process):
 
 
                 mu = opt.x[0]
+                light_rt_dev = abs(mu-rt)
                 opt_std = abs(opt.x[1])
-                opt_offset = opt.x[2]
+                #opt_offset = opt.x[2]
+                opt_offset = 0
                 light_residuals = opt.fun
                 fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
                 light_int = integrate.quad(fit, mu-6*opt_std, mu+6*opt_std)[0]
-                if self.debug:
+                if self.debug or self.html:
                     pylab.figure()
                     ax = light_data.plot(color='b', title=str(light_int))
                     pd.Series(dict(zip(X, fit(X)+opt_offset))).plot(color='r')
                     pylab.plot([rt, rt], [0, (amp-opt_offset)], color='k')
                     pylab.plot([mu, mu], [0, (amp-opt_offset)], color='r')
-                    pdf.savefig(figure=ax.get_figure())
+                    if self.debug:
+                        pdf.savefig(figure=ax.get_figure())
+                    if self.html:
+                        fname = os.path.join(self.html, '{2}_{0}_{1}_light_rt.png'.format(peptide, ms1, self.filename))
+                        ax.get_figure().savefig(fname, format='png', dpi=50)
+                        html_images['light_rt'] = fname
 
                 if quant:
                     amp = heavy_data.max()
-                    params = np.array([rt, 0.1, heavy_data.quantile([0.1]).iloc[0]])
+                    #params = np.array([rt, 0.1, heavy_data.quantile([0.1]).iloc[0]])
+                    params = np.array([rt, 0.1])
 
                     opt = optimize.minimize(self.gfit, params, args=(heavy_data.index.values, heavy_data.values, amp, rt), method='Nelder-Mead',
                                             options={'xtol': 1e-8})
@@ -335,22 +359,32 @@ class Worker(Process):
                     X = heavy_data.index.values
 
                     mu = opt.x[0]
+                    heavy_rt_dev = abs(mu-rt)
                     opt_std = abs(opt.x[1])
-                    opt_offset = opt.x[2]
+                    #opt_offset = opt.x[2]
+                    opt_offset = 0
                     heavy_residuals = opt.fun
                     fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
                     heavy_int = integrate.quad(fit, mu-6*opt_std, mu+6*opt_std)[0]
                     light_rats = [df.iloc[v]/df.iloc[light['envelope'][i]] for i,v in enumerate(light['envelope'][1:])]
                     heavy_rats = [df.iloc[v]/df.iloc[heavy['envelope'][i]] for i,v in enumerate(heavy['envelope'][1:])]
                     cluster_rat = sum([(i-v) for i, v in zip(light_rats, heavy_rats[:-1])])
-                    if self.debug:
+                    if self.debug or self.html:
                         pylab.figure()
                         ax = heavy_data.plot(color='b', title=str(heavy_int))
                         pd.Series(dict(zip(X, fit(X)+opt_offset))).plot(color='r')
                         pylab.plot([rt, rt], [0, (amp-opt_offset)], color='k')
                         pylab.plot([mu, mu], [0, (amp-opt_offset)], color='r')
-                        pdf.savefig(figure=ax.get_figure())
-                        pdf.close()
+                        if self.debug:
+                            pdf.savefig(figure=ax.get_figure())
+                        if self.html:
+                            fname = os.path.join(self.html, '{2}_{0}_{1}_heavy_rt.png'.format(peptide, ms1, self.filename))
+                            ax.get_figure().savefig(fname, format='png', dpi=50)
+                            html_images['heavy_rt'] = fname
+
+
+                if self.debug:
+                    pdf.close()
 
                 self.results.put({'peptide': peptide, 'heavy': heavy_int if quant else 'NA', 'light': light_int,
                                   'scan': scanId, 'light_clusters': light_clusters,
@@ -359,13 +393,13 @@ class Worker(Process):
                                   'charge': charge, 'modifications': mods, 'light_precursor': light_precursor,
                                   'heavy_precursor': heavy_precursor if quant else 'NA',
                                   'light_residuals': light_residuals, 'heavy_residuals': heavy_residuals if quant else 'NA',
-                                  'cluster_ratio_deviation': cluster_rat if quant else 'NA'})
+                                  'cluster_ratio_deviation': cluster_rat if quant else 'NA', 'light_rt_dev': light_rt_dev,
+                                  'heavy_rt_dev': heavy_rt_dev if quant else 'NA', 'html_info': html_images})
                 self.cleanScans(rt_index_map, rt)
             except:
                 sys.stderr.write('ERROR ON {0}\n{1}\n{2}\n'.format(ms1, scan_info, traceback.format_exc()))
                 continue
         self.results.put(None)
-
 
 
 
@@ -378,6 +412,7 @@ def main():
     hdf = args.mzml
     save_files = args.no_temp
     sparse = args.no_sparse
+    html = args.html
 
 
     hdf_filemap = {}
@@ -456,7 +491,62 @@ def main():
     completed = 0
     sys.stderr.write('Beginning SILAC quantification.\n')
     scan_count = len(mass_scans)
-    out.write('{0}\n'.format('\t'.join(['Raw File']+[i[1] for i in RESULT_ORDER])))
+    headers = ['Raw File']+[i[1] for i in RESULT_ORDER]
+    out.write('{0}\n'.format('\t'.join(headers)))
+    html_list = []
+    if html:
+        html_out = open('{0}.html'.format(source), 'wb')
+        html = os.path.join(os.path.split(source)[0], 'images')
+        try:
+            os.mkdir(html)
+        except OSError:
+            pass
+        def table_rows(html_list, res=None):
+            # each item is a string like a\tb\tc
+            if html_list:
+                d = html_list.pop(0)
+            else:
+                return res
+            l = d['table']
+            images = d['images']
+            if res is None:
+                res = '<tr>'
+            out = []
+            for i,v in zip(l.split('\t'), headers):
+                if v == 'Heavy' and 'heavy_rt' in images:
+                    out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images['heavy_rt'], i))
+                elif v == 'Light' and 'light_rt' in images:
+                    out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images['light_rt'], i))
+                elif v == 'Peptide' and 'clusters' in images:
+                    out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images['clusters'], i))
+                else:
+                    out.append('<td>{0}</td>'.format(i))
+            res += '\n'.join(out)+'</tr>'
+            return table_rows(html_list, res=res)
+
+        html_out.write(
+                """<!DOCTYPE html>
+                <html>
+                <head lang="en">
+                    <meta charset="UTF-8">
+                    <title>{0}</title>
+                    <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/css/bootstrap.min.css" type="text/css">
+                    <link rel="stylesheet" href="http://cdn.datatables.net/1.10.5/css/jquery.dataTables.css" type="text/css">
+                </head>
+                <body>
+                    <table id="raw-table" class="table table-striped table-bordered table-hover">
+                        <thead>
+                            <tr>
+                            {1}
+                            </tr>
+                        </thead>
+                        <tbody>
+                """.format(
+                    source,
+                    '\n'.join(['<th>{0}</th>'.format(i) for i in ['Raw File']+[i[1] for i in RESULT_ORDER]])
+                )
+        )
+
     for filename, mass_scans in raw_files.iteritems():
         filepath = hdf_filemap[filename]
         sys.stderr.write('Processing {0}.\n'.format(filename))
@@ -464,11 +554,14 @@ def main():
         result_queue = Queue()
         in_queues[filename] = in_queue
         result_queues[filename] = result_queue
-        worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, heavy_masses=heavy_masses, temp=save_files, sparse=sparse, debug=args.debug)
+        worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, heavy_masses=heavy_masses,
+                        temp=save_files, sparse=sparse, debug=args.debug, html=html)
         workers[filename] = worker
         worker.start()
 
         for scan_index, v in enumerate(mass_scans):
+            # if scan_index % 100 != 0:
+            #     continue
             params = {}
             params['scan_info'] = v
             scan = msf_scan_index.get((v.get('id'), v.get('peptide')))
@@ -483,7 +576,10 @@ def main():
         if len(workers) == threads:
             # clear the queues
             while workers:
+                empty_queue = set([])
                 for rawstr, queue in result_queues.iteritems():
+                    if rawstr in empty_queue:
+                        continue
                     try:
                         result = queue.get(timeout=0.1)
                     except Empty:
@@ -493,19 +589,26 @@ def main():
                         if worker.is_alive():
                             worker.terminate()
                         del workers[rawstr]
+                        empty_queue.add(rawstr)
                     else:
                         completed += 1
                         if completed % 10 == 0:
                             sys.stderr.write('\r{0:2.2f}% Completed'.format(completed/scan_count*100))
                             sys.stderr.flush()
                             # sys.stderr.write('Processed {0} of {1}...\n'.format(completed, scan_count))
-                        out.write('{0}\t{1}\n'.format(rawstr, '\t'.join([str(result[i[0]]) for i in RESULT_ORDER])))
+                        res = '{0}\t{1}\n'.format(rawstr, '\t'.join([str(result[i[0]]) for i in RESULT_ORDER]))
+                        out.write(res)
+                        if html:
+                            html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
                         out.flush()
             workers = {}
             result_queues = {}
 
     while workers:
+        empty_queue = set([])
         for rawstr, queue in result_queues.iteritems():
+            if rawstr in empty_queue:
+                continue
             try:
                 result = queue.get(timeout=0.1)
             except Empty:
@@ -515,19 +618,51 @@ def main():
                 if worker.is_alive():
                     worker.terminate()
                 del workers[rawstr]
+                empty_queue.add(rawstr)
             else:
                 completed += 1
                 if completed % 10 == 0:
                     sys.stderr.write('\r{0:2.2f}% Completed'.format(completed/scan_count*100))
                     sys.stderr.flush()
                     # sys.stderr.write('Processed {0} of {1}...\n'.format(completed, scan_count))
-                out.write('{0}\t{1}\n'.format(rawstr, '\t'.join([str(result[i[0]]) for i in RESULT_ORDER])))
+                res = '{0}\t{1}\n'.format(rawstr, '\t'.join([str(result[i[0]]) for i in RESULT_ORDER]))
+                out.write(res)
+                if html:
+                    html_list.append(res.strip())
                 out.flush()
 
     out.flush()
     out.close()
 
-
+    if html:
+        html_out.write(
+                """
+                        </tbody>
+                    </table>
+                </body>
+                <footer></footer>
+                <script type="text/javascript" src="http://code.jquery.com/jquery-1.11.1.min.js"></script>
+                <script type="text/javascript" src="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/js/bootstrap.min.js"></script>
+                <script type="text/javascript" src="http://cdn.datatables.net/1.10.5/js/jquery.dataTables.min.js"></script>
+                <script>
+                    $(document).ready(function() {
+                        $('#raw-table').DataTable();
+                        var reload = false;
+                        $('[data-toggle="popover"]').popover({ html : true, container: 'footer', placement: 'bottom' });
+                        $('#raw-table').on( 'page.dt search.dt init.dt order.dt', function () {
+                        	reload = true;
+                        });
+                        $('#raw-table').on( 'draw.dt', function () {
+                        	if(reload){
+                        		$('[data-toggle="popover"]').popover({ html : true, container: 'footer', placement: 'bottom' });
+                        		reload = false;
+                        	}
+                        });
+                    });
+                </script>
+                </html>
+                """
+            )
 
 
 if __name__ == "__main__":
