@@ -30,7 +30,7 @@ RESULT_ORDER = (('peptide', 'Peptide'), ('heavy', 'Heavy'), ('light', 'Light'), 
                 ('charge', 'Charge'), ('ms1', 'MS1 Spectrum ID'), ('scan', 'MS2 Spectrum ID'), ('light_precursor', 'Light Precursor M/Z'),
                 ('heavy_precursor', 'Heavy Precursor M/Z'),
                 ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'), ('light_residuals', 'Light Intensity Residuals of Fit'),
-                ('heavy_residuals', 'Heavy Intensity Residuals of Fit'))
+                ('heavy_residuals', 'Heavy Intensity Residuals of Fit'), ('cluster_ratio_deviation', 'Deviation of Heavy Clusters From Light'))
 
 
 parser = CustomParser(description=description)
@@ -170,8 +170,6 @@ class Worker(Process):
         import time
         args = parser.parse_args()
         source = self.raw_name
-        # look for our pickle first
-        pickle = '{0}.{1}'.format(os.path.splitext(source)[0], 'npz')
         # if os.path.exists(pickle):
         #     res = np.load(pickle)
         #     scan_rt_map, rt_index_map, df_map = res['scan_rt_map'].tolist(), res['rt_index_map'].tolist(), res['df_map'].tolist()
@@ -279,9 +277,9 @@ class Worker(Process):
                     fig = ax.get_figure()
                     pdf.savefig(figure=fig)
                     pylab.figure()
-                    ax = pylab.plot(light_x,light_y, color='b')
+                    ax = pylab.plot(light_x, light_y, color='b')
                     if quant:
-                        pylab.plot(heavy_x,heavy_y, color='r')
+                        pylab.plot(heavy_x, heavy_y, color='r')
                     fig = ax[0].get_figure()
                     pdf.savefig(figure=fig)
 
@@ -314,7 +312,7 @@ class Worker(Process):
 
 
                 mu = opt.x[0]
-                opt_std = opt.x[1]
+                opt_std = abs(opt.x[1])
                 opt_offset = opt.x[2]
                 light_residuals = opt.fun
                 fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
@@ -337,11 +335,14 @@ class Worker(Process):
                     X = heavy_data.index.values
 
                     mu = opt.x[0]
-                    opt_std = opt.x[1]
+                    opt_std = abs(opt.x[1])
                     opt_offset = opt.x[2]
                     heavy_residuals = opt.fun
                     fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
                     heavy_int = integrate.quad(fit, mu-6*opt_std, mu+6*opt_std)[0]
+                    light_rats = [df.iloc[v]/df.iloc[light['envelope'][i]] for i,v in enumerate(light['envelope'][1:])]
+                    heavy_rats = [df.iloc[v]/df.iloc[heavy['envelope'][i]] for i,v in enumerate(heavy['envelope'][1:])]
+                    cluster_rat = sum([(i-v) for i, v in zip(light_rats, heavy_rats[:-1])])
                     if self.debug:
                         pylab.figure()
                         ax = heavy_data.plot(color='b', title=str(heavy_int))
@@ -357,14 +358,13 @@ class Worker(Process):
                                   'heavy_clusters': heavy_clusters if quant else 'NA', 'ms1': ms1,
                                   'charge': charge, 'modifications': mods, 'light_precursor': light_precursor,
                                   'heavy_precursor': heavy_precursor if quant else 'NA',
-                                  'light_residuals': light_residuals, 'heavy_residuals': heavy_residuals if quant else 'NA'})
+                                  'light_residuals': light_residuals, 'heavy_residuals': heavy_residuals if quant else 'NA',
+                                  'cluster_ratio_deviation': cluster_rat if quant else 'NA'})
                 self.cleanScans(rt_index_map, rt)
             except:
                 sys.stderr.write('ERROR ON {0}\n{1}\n{2}\n'.format(ms1, scan_info, traceback.format_exc()))
                 continue
         self.results.put(None)
-        if self.temp and not os.path.exists(pickle):
-            np.savez(pickle, scan_rt_map=scan_rt_map, rt_index_map=rt_index_map, df_map=df_map, data=self.data)
 
 
 
