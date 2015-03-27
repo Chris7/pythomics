@@ -19,6 +19,7 @@ import numpy as np
 import re
 import pylab
 from multiprocessing import Process, Queue
+from profilestats import profile
 from Queue import Empty
 from scipy import integrate, optimize
 from matplotlib.backends.backend_pdf import PdfPages
@@ -71,6 +72,7 @@ class Worker(Process):
         self.rt_tol = 0.2 # for fitting
         self.debug = debug
         self.html = html
+        self.last_clean = 0 # for cleaning up scans before our current RT window
         sys.stderr.write('Thread spawned: Sparse: {0}\n'.format(self.sparse))
 
     def findMicro(self, df, pos):
@@ -156,13 +158,15 @@ class Worker(Process):
         return self.data[ms1].to_dense() if dense else self.data[ms1]
 
     def cleanScans(self, rt_map, current_rt):
-        min_rt = current_rt - self.rt_width*1.1
-        old_scans = [rt_map[i] for i,v in rt_map.iteritems() if v < min_rt]
-        for i in old_scans:
-            if i in self.data:
-                del self.data[i]
-        import gc
-        gc.collect()
+        min_rt = current_rt - self.rt_width
+        if min_rt > self.last_clean:
+            old_scans = rt_map[self.last_clean:min_rt].values
+            self.last_clean = current_rt - self.rt_width
+            for i in old_scans:
+                if i in self.data:
+                    del self.data[i]
+            import gc
+            gc.collect()
 
     def gfit(self, params, X, Y, amp, rt):
         #mu, std, offset = params[0], params[1], params[2]
@@ -205,7 +209,9 @@ class Worker(Process):
                 # if self.sparse:
                 #     data[-1] = data[-1].to_sparse(fill_value=0)
         rt_index_map = pd.Series(rt_index_map)
-        for params in iter(self.queue.get, None):
+
+        # @profile(print_stats=10, dump_stats=True)
+        def run_thing(params):
             try:
                 html_images = {}
                 start_time = time.time()
@@ -213,11 +219,11 @@ class Worker(Process):
                 scan = params.get('scan')
                 scanId = scan_info['id']
                 if not scan:
-                    continue
+                    return
                 ms1 = int(scan.get('ms1'))
                 rt = scan_rt_map.get(ms1)
                 if not rt:
-                    continue
+                    return
                 mods = scan_info.get('modifications')
                 charge = int(scan.get('charge'))
                 precursor = scan.get('mass')+self.hydrogen*(charge-1)
@@ -287,6 +293,8 @@ class Worker(Process):
                     fig = ax.get_figure()
                     if self.debug:
                         pdf.savefig(figure=fig)
+                    fig.clf()
+
 
                     pylab.figure()
                     ax = pylab.plot(light_x, light_y, color='b')
@@ -299,15 +307,21 @@ class Worker(Process):
                         fname = os.path.join(self.html, '{2}_{0}_{1}_clusters.png'.format(peptide, ms1, self.filename))
                         fig.savefig(fname, format='png', dpi=50)
                         html_images['clusters'] = fname
+                    fig.clf()
 
 
                 scan_query = ' | '.join([light_query, heavy_query] if quant else [light_query])
                 try:
                     # use the RT to condense our search
-                    scan_block = pd.concat([self.getScan(i, dense=False).dropna().to_frame().query(scan_query) for i in rt_index_map[rt-self.rt_width:rt+self.rt_width]], axis=1)
+                    t = time.time()
+                    # print time.time()-t, 'time to get ', len(scan_list), 'scans'
+                    scan_block = pd.concat((self.getScan(i, dense=False).dropna().to_frame().query(scan_query) for i in rt_index_map[rt-self.rt_width:rt+self.rt_width]), axis=1)
+                    t = time.time()
+                    # print 'concat time is', time.time()-t
+                    # print 'scan block is,', scan_block.shape, scan_block.memory_usage(index=True).sum()
                 except:
                     sys.stderr.write('ERROR ON {0}\n{1}\n{2}\n{3}\n'.format(ms1, scan_info, scan_query, traceback.format_exc()))
-                    continue
+                    return
                 scan_block.dropna(how='all', inplace=True)
 
                 light_data = scan_block.query(light_query).fillna(0).sum()
@@ -347,6 +361,7 @@ class Worker(Process):
                         fname = os.path.join(self.html, '{2}_{0}_{1}_light_rt.png'.format(peptide, ms1, self.filename))
                         ax.get_figure().savefig(fname, format='png', dpi=50)
                         html_images['light_rt'] = fname
+                    ax.get_figure().clf()
 
                 if quant:
                     amp = heavy_data.max()
@@ -381,6 +396,8 @@ class Worker(Process):
                             fname = os.path.join(self.html, '{2}_{0}_{1}_heavy_rt.png'.format(peptide, ms1, self.filename))
                             ax.get_figure().savefig(fname, format='png', dpi=50)
                             html_images['heavy_rt'] = fname
+                        ax.get_figure().clf()
+                        pylab.close('all')
 
 
                 if self.debug:
@@ -396,9 +413,12 @@ class Worker(Process):
                                   'cluster_ratio_deviation': cluster_rat if quant else 'NA', 'light_rt_dev': light_rt_dev,
                                   'heavy_rt_dev': heavy_rt_dev if quant else 'NA', 'html_info': html_images})
                 self.cleanScans(rt_index_map, rt)
+                # print 'run tim eis', time.time()-start_time
             except:
                 sys.stderr.write('ERROR ON {0}\n{1}\n{2}\n'.format(ms1, scan_info, traceback.format_exc()))
-                continue
+                return
+        for params in iter(self.queue.get, None):
+            run_thing(params)
         self.results.put(None)
 
 
@@ -496,7 +516,11 @@ def main():
     html_list = []
     if html:
         html_out = open('{0}.html'.format(source), 'wb')
-        html = os.path.join(os.path.split(source)[0], 'images')
+        import unicodedata
+        value = unicodedata.normalize('NFKD', unicode(os.path.splitext(os.path.split(source)[1])[0])).encode('ascii', 'ignore')
+        value = unicode(re.sub('[^\w\s-]', '', value).strip().lower())
+        value = unicode(re.sub('[-\s]+', '-', value))
+        html = os.path.join(os.path.split(source)[0], os.path.normpath(value)+'_images')
         try:
             os.mkdir(html)
         except OSError:
