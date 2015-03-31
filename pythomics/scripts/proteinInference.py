@@ -117,7 +117,7 @@ def main():
     with tsv_file as f:
         reader = csv.reader(f, delimiter=delimiter)
         for line_num, entry in enumerate(reader):
-            if line_num < header_lines:#we assume the first header line is the one we care about
+            if line_num < header_lines:# we assume the first header line is the one we care about
                 if peptide_column is None:
                     for i,v in enumerate(entry):
                         if v.lower() == args.col.lower():
@@ -239,7 +239,10 @@ def main():
                                         mod_grouping[protein]['%s%d'%(k, mod_pos)]['values'].add(d['mod_col'])
                                         mod_grouping[protein]['%s%d'%(k, mod_pos)]['peptides'].add(peptide)
                                     except KeyError:
-                                        mod_grouping[protein] = {'%s%d'%(k, mod_pos): {'values': set([d['mod_col']]), 'peptides': set([peptide])}}
+                                        try:
+                                            mod_grouping[protein]['%s%d'%(k, mod_pos)] = {'values': set([d['mod_col']]), 'peptides': set([peptide])}
+                                        except KeyError:
+                                            mod_grouping[protein] = {'%s%d'%(k, mod_pos): {'values': set([d['mod_col']]), 'peptides': set([peptide])}}
                             mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
                         peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
                     if out_position:
