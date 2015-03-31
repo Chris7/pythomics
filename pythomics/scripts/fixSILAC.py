@@ -51,7 +51,8 @@ parser.add_argument('--debug', help="This will output debug information and grap
 parser.add_argument('--skip', help="If true, skip scans with missing files in the mapping.", action='store_true')
 parser.add_argument('--peptide', help="The peptide to limit quantification to.", type=str)
 parser.add_argument('--html', help="Output a HTML table summary.", action='store_true')
-parser.add_out()
+parser.add_argument('--resume', help="Will resume from the last run. Only works if not directing output to stdout.", action='store_true')
+parser.add_argument('-o', '--out', nargs='?', help='Stuff', type=str)
 
 class Worker(Process):
     def __init__(self, queue=None, results=None, precision=6, raw_name=None, heavy_masses=None, temp=False, sparse=False, debug=False, html=False):
@@ -194,7 +195,10 @@ class Worker(Process):
             rt_index_map = {}
             df_map = {}
             precision = self.precision
+            sys.stderr.write('Thread processing peptide file.\n')
             for index, i in enumerate(self.raw):
+                if index % 100 == 0:
+                    sys.stderr.write('.')
                 if i is None:
                     break
                 if i.ms_level != 1:
@@ -208,6 +212,7 @@ class Worker(Process):
                 # data.append(pd.Series(dict([(np.round(mz, precision), int(intensity)) for mz, intensity in i.scans]), dtype='uint16', name=rt))
                 # if self.sparse:
                 #     data[-1] = data[-1].to_sparse(fill_value=0)
+            sys.stderr.write('Scans Loaded\n')
         rt_index_map = pd.Series(rt_index_map)
 
         # @profile(print_stats=10, dump_stats=True)
@@ -244,6 +249,21 @@ class Worker(Process):
                 quant = light_precursor != heavy_precursor
 
                 light = self.findEnvelope(df, start_mz=light_precursor, charge=charge, ppm=5)
+                if quant:
+                    heavy = self.findEnvelope(df, start_mz=heavy_precursor, charge=charge, ppm=5)
+                    # check for overlap of heavy/light
+                    common_peaks = set(light['envelope']).intersection(set(heavy['envelope']))
+                    for common_peak in common_peaks:
+                        # light yields to heavy
+                        print 'yield yield yield', common_peak
+                        print light
+                        print heavy
+                        common_index = light['envelope'].index(common_peak)
+                        del light['envelope'][common_index]
+                        del light['micro_envelopes'][common_index]
+                        del light['ppms'][common_index-1]
+                        print light
+                        print heavy
 
 
                 start_mzs = [df.index[i[0]] for i in light['micro_envelopes']]
@@ -252,7 +272,6 @@ class Worker(Process):
                 light_query = ' | '.join(['(index >= {0} & index <= {1})'.format(start, end) for start, end in zip(start_mzs, end_mzs)])
 
                 if quant:
-                    heavy = self.findEnvelope(df, start_mz=heavy_precursor, charge=charge, ppm=5)
                     heavy_start_mzs = [df.index[i[0]] for i in heavy['micro_envelopes']]
                     heavy_end_mzs = [df.index[i[-1]] for i in heavy['micro_envelopes']]
                     heavy_clusters = len(heavy_start_mzs)
@@ -304,9 +323,9 @@ class Worker(Process):
                     if self.debug:
                         pdf.savefig(figure=fig)
                     if self.html:
-                        fname = os.path.join(self.html, '{2}_{0}_{1}_clusters.png'.format(peptide, ms1, self.filename))
-                        fig.savefig(fname, format='png', dpi=50)
-                        html_images['clusters'] = fname
+                        fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
+                        fig.savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
+                        html_images['clusters'] = os.path.join(self.html['rel'], fname)
                     fig.clf()
 
 
@@ -358,9 +377,9 @@ class Worker(Process):
                     if self.debug:
                         pdf.savefig(figure=ax.get_figure())
                     if self.html:
-                        fname = os.path.join(self.html, '{2}_{0}_{1}_light_rt.png'.format(peptide, ms1, self.filename))
-                        ax.get_figure().savefig(fname, format='png', dpi=50)
-                        html_images['light_rt'] = fname
+                        fname = '{2}_{0}_{1}_{3}_light_rt.png'.format(peptide, ms1, self.filename, scanId)
+                        ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
+                        html_images['light_rt'] = os.path.join(self.html['rel'], fname)
                     ax.get_figure().clf()
 
                 if quant:
@@ -393,9 +412,9 @@ class Worker(Process):
                         if self.debug:
                             pdf.savefig(figure=ax.get_figure())
                         if self.html:
-                            fname = os.path.join(self.html, '{2}_{0}_{1}_heavy_rt.png'.format(peptide, ms1, self.filename))
-                            ax.get_figure().savefig(fname, format='png', dpi=50)
-                            html_images['heavy_rt'] = fname
+                            fname = '{2}_{0}_{1}_{3}_heavy_rt.png'.format(peptide, ms1, self.filename, scanId)
+                            ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
+                            html_images['heavy_rt'] = os.path.join(self.html['rel'], fname)
                         ax.get_figure().clf()
                         pylab.close('all')
 
@@ -433,6 +452,7 @@ def main():
     save_files = args.no_temp
     sparse = args.no_sparse
     html = args.html
+    resume = args.resume
 
 
     hdf_filemap = {}
@@ -512,19 +532,33 @@ def main():
     sys.stderr.write('Beginning SILAC quantification.\n')
     scan_count = len(mass_scans)
     headers = ['Raw File']+[i[1] for i in RESULT_ORDER]
-    out.write('{0}\n'.format('\t'.join(headers)))
+    if resume:
+        if not out:
+            sys.stderr.write('You may only resume runs with a file output.\n')
+            return -1
+        out = open(out, 'ab')
+        out_path = out.name
+    else:
+        if out:
+            out = open(out, 'wb')
+            out_path = out.name
+        else:
+            out = sys.stdout
+            out_path = source
+        out.write('{0}\n'.format('\t'.join(headers)))
     html_list = []
     if html:
-        html_out = open('{0}.html'.format(source), 'wb')
         import unicodedata
-        value = unicodedata.normalize('NFKD', unicode(os.path.splitext(os.path.split(source)[1])[0])).encode('ascii', 'ignore')
+        value = unicodedata.normalize('NFKD', unicode(os.path.splitext(os.path.split(out_path)[1])[0])).encode('ascii', 'ignore')
         value = unicode(re.sub('[^\w\s-]', '', value).strip().lower())
         value = unicode(re.sub('[-\s]+', '-', value))
-        html = os.path.join(os.path.split(source)[0], os.path.normpath(value)+'_images')
+        html = os.path.join(os.path.split(out_path)[0], os.path.normpath(value)+'_images')
         try:
             os.mkdir(html)
         except OSError:
             pass
+        html = {'full': os.path.join(os.path.split(out_path)[0], os.path.normpath(value)+'_images'),
+                'rel':os.path.normpath(value)+'_images' }
         def table_rows(html_list, res=None):
             # each item is a string like a\tb\tc
             if html_list:
@@ -547,29 +581,40 @@ def main():
                     out.append('<td>{0}</td>'.format(i))
             res += '\n'.join(out)+'</tr>'
             return table_rows(html_list, res=res)
+        if resume:
+            html_out = open('{0}.html'.format(out_path), 'ab')
+        else:
+            html_out = open('{0}.html'.format(out_path), 'wb')
+            html_out.write(
+                    """<!DOCTYPE html>
+                    <html>
+                    <head lang="en">
+                        <meta charset="UTF-8">
+                        <title>{0}</title>
+                        <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/css/bootstrap.min.css" type="text/css">
+                        <link rel="stylesheet" href="http://cdn.datatables.net/1.10.5/css/jquery.dataTables.css" type="text/css">
+                    </head>
+                    <body>
+                        <table id="raw-table" class="table table-striped table-bordered table-hover">
+                            <thead>
+                                <tr>
+                                {1}
+                                </tr>
+                            </thead>
+                            <tbody>
+                    """.format(
+                        source,
+                        '\n'.join(['<th>{0}</th>'.format(i) for i in ['Raw File']+[i[1] for i in RESULT_ORDER]])
+                    )
+            )
 
-        html_out.write(
-                """<!DOCTYPE html>
-                <html>
-                <head lang="en">
-                    <meta charset="UTF-8">
-                    <title>{0}</title>
-                    <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/css/bootstrap.min.css" type="text/css">
-                    <link rel="stylesheet" href="http://cdn.datatables.net/1.10.5/css/jquery.dataTables.css" type="text/css">
-                </head>
-                <body>
-                    <table id="raw-table" class="table table-striped table-bordered table-hover">
-                        <thead>
-                            <tr>
-                            {1}
-                            </tr>
-                        </thead>
-                        <tbody>
-                """.format(
-                    source,
-                    '\n'.join(['<th>{0}</th>'.format(i) for i in ['Raw File']+[i[1] for i in RESULT_ORDER]])
-                )
-        )
+    skip_map = set([])
+    if resume:
+        import csv
+        for entry in csv.reader(open(out.name, 'rb'), delimiter='\t'):
+            # key is filename, peptide, modifications, charge, ms2 id
+            key = (entry[0], entry[1], entry[5], entry[6], entry[8])
+            skip_map.add(key)
 
     for filename, mass_scans in raw_files.iteritems():
         filepath = hdf_filemap[filename]
@@ -584,6 +629,11 @@ def main():
         worker.start()
 
         for scan_index, v in enumerate(mass_scans):
+            if resume:
+                key = (v.get('file'), v.get('peptide'), v.get('modifications'), v.get('charge'), v.get('id'))
+                if key in skip_map:
+                    completed += 1
+                    continue
             # if scan_index % 100 != 0:
             #     continue
             params = {}
@@ -625,6 +675,7 @@ def main():
                         if html:
                             html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
                         out.flush()
+                        html_out.flush()
             workers = {}
             result_queues = {}
 
@@ -652,8 +703,9 @@ def main():
                 res = '{0}\t{1}\n'.format(rawstr, '\t'.join([str(result[i[0]]) for i in RESULT_ORDER]))
                 out.write(res)
                 if html:
-                    html_list.append(res.strip())
+                    html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
                 out.flush()
+                html_out.flush()
 
     out.flush()
     out.close()
@@ -670,10 +722,12 @@ def main():
                 <script type="text/javascript" src="http://cdn.datatables.net/1.10.5/js/jquery.dataTables.min.js"></script>
                 <script>
                     $(document).ready(function() {
-                        $('#raw-table').DataTable();
+                        $('#raw-table').DataTable({
+                            "iDisplayLength": 100,
+                        });
                         var reload = false;
                         $('[data-toggle="popover"]').popover({ html : true, container: 'footer', placement: 'bottom' });
-                        $('#raw-table').on( 'page.dt search.dt init.dt order.dt', function () {
+                        $('#raw-table').on( 'page.dt search.dt init.dt order.dt length.dt', function () {
                         	reload = true;
                         });
                         $('#raw-table').on( 'draw.dt', function () {
