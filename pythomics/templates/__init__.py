@@ -125,4 +125,11 @@ class CustomParser(argparse.ArgumentParser):
         group.add_out = self.add_out
         group.add_vcf = self.add_vcf
         return group
-    
+
+    def add_ms_files(self, help='The corresponding raw mass spectrometry file (ie .raw, .mzml).'):
+        self.add_argument('--raw', nargs='?', help=help, type=str)
+
+    def add_processed_ms(self, help='The corresponding processed mass spectrometry files (ie .msf, .dat).'):
+        self.add_argument('--processed', nargs='?', help=help, type=str)
+
+
