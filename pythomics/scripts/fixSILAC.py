@@ -476,7 +476,7 @@ def main():
             sys.stderr.write('.')
         if args.peptide and args.peptide.lower() != i.peptide.lower():
             continue
-        specId = i.spectrumId
+        specId = str(i.rawId)
         if specId in mass_scans:
             continue
         shift = 0.0
@@ -492,7 +492,7 @@ def main():
             sys.stderr.write('.')
         if scan is None:
             break
-        msf_scans[(scan.spectrumId, scan.peptide)] = scan
+        msf_scans[(str(scan.rawId), scan.peptide)] = scan
     sys.stderr.write('\nScans loaded.\n')
 
     raw_files = {}
@@ -502,6 +502,7 @@ def main():
     for specId, i in mass_scans.iteritems():
         if index%1000 == 0:
             sys.stderr.write('.')
+        # import pdb; pdb.set_trace();
         scan = msf_scans.get((specId, i.get('peptide')))
         fname = os.path.splitext(scan.file)[0]
         if fname not in hdf_filemap:
@@ -516,7 +517,6 @@ def main():
         except KeyError:
             raw_files[fname] = [(i.get('rt'), i)]
         msf_scan_index[(specId, i.get('peptide'))] = {'mass': scan.mass, 'charge': scan.charge, 'ms1': scan.ms1_scan.title}
-
 
     # sort by RT so we can minimize our memory footprint by throwing away scans we no longer need
     for i in raw_files.keys():
@@ -672,10 +672,10 @@ def main():
                             # sys.stderr.write('Processed {0} of {1}...\n'.format(completed, scan_count))
                         res = '{0}\t{1}\n'.format(rawstr, '\t'.join([str(result[i[0]]) for i in RESULT_ORDER]))
                         out.write(res)
+                        out.flush()
                         if html:
                             html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
-                        out.flush()
-                        html_out.flush()
+                            html_out.flush()
             workers = {}
             result_queues = {}
 
@@ -702,10 +702,12 @@ def main():
                     # sys.stderr.write('Processed {0} of {1}...\n'.format(completed, scan_count))
                 res = '{0}\t{1}\n'.format(rawstr, '\t'.join([str(result[i[0]]) for i in RESULT_ORDER]))
                 out.write(res)
+                out.flush()
                 if html:
                     html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
-                out.flush()
-                html_out.flush()
+                    html_out.flush()
+
+
 
     out.flush()
     out.close()
