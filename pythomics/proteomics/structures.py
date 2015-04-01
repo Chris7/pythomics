@@ -30,11 +30,13 @@ class ScanObject(object):
     A scan object to store peaklist information in.
     Attributes:
     title, charge, mass, scans(list), rt
+    rawId: The source of the scan in the raw file (ie the source -- mzML, raw, etc.)
     """
     def __init__(self):
         self.scans = []
         self.rt = 0.0
         self.ms_level = None
+        self.rawId = None
 
     def writeScan(self, o):
         o.write('BEGIN IONS\n')

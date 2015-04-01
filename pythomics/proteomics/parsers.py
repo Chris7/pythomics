@@ -164,7 +164,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
                 title = int(title)
             except:
                 pass
-            if title > self.start and self.ms_filter and ms_level==self.ms_filter and full:
+            if title > self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
                 mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
                 mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
                 mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
@@ -189,7 +189,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             return None
         # elif spect:
         #     raise StopIteration
-    
+
     def next(self):
         if self.spectra:
             spectra = self.spectra.next()
@@ -1081,6 +1081,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         scanObj.title = sid
                         scanObj.id = sid
                         scanObj.rt = float(finfo[7])
+                        scanObj.rawId = finfo[scanIndex]
                         master_scan = finfo[5]
                         stage=1
                 elif stage == 1:
@@ -1156,6 +1157,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.title = sid
             scanObj.id = sid
             scanObj.spectrumId=i[5]
+            scanObj.rawId = lScan
             objs.append(scanObj)
         return objs
 
