@@ -17,7 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 __author__ = 'Chris Mitchell'
 
-import sys, copy, struct, base64, gzip
+import sys, copy, struct, base64, gzip, operator
 from os import path
 import pythomics.templates as templates
 from pythomics.proteomics.structures import PeptideObject, ScanObject, Chromatogram
@@ -374,6 +374,110 @@ class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
             return self.scans[id]
         except IndexError:
             sys.stderr.write('pepxml cannto find %s\n'%id)
+            return None
+
+class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
+    #TODO: Random access, fetch scan by id
+    def __init__(self, filename, **kwargs):
+        """An iterator over the mzData file format.
+
+        mzData doesn't have random access built in, for now this is more of a reader
+        class since we read in all the peptides then match them up while we iterate over
+        spectra. This is also clunky and not optimized because I rarely use this format, if ever.
+
+        The returned items are PeptideObjects
+
+        """
+        super(mzDataIterator, self).__init__(filename)
+        self.peptides = {}
+        self.store = kwargs.get('store', False)
+        try:
+            # find our peptides and process them first
+            peps = etree.iterparse(self.filename, tag=('PeptideItem',))
+            for tag, peptideXML in peps:
+                pepObj = PeptideObject()
+                peptide = peptideXML.find('Sequence').text
+                spectrum = peptideXML.find('SpectrumReference').text
+                pepObj.rawId = spectrum
+                pepObj.title = spectrum
+                pepObj.id = spectrum
+                pepObj.peptide = peptide
+                additional = peptideXML.find('additional')
+                userParams = dict([(j.get('name'),j.get('value')) for j in additional.findall('userParam')])
+                cvParam = dict([(j.get('name'),j.get('value')) for j in additional.findall('cvParam')])
+                pepObj.charge = cvParam.get('charge state', None)
+                pepObj.mass = userParams.get('Experimental Mass')
+                modifications = peptideXML.iterfind('ModificationItem')
+                for modification in modifications:
+                    position = int(modification.find('ModLocation').text)-1
+                    mod_aa = peptide[position]
+                    mass = modification.find('ModMonoDelta').text
+                    additional = modification.find('additional')
+                    userParams = dict([(j.get('name'),j.get('value')) for j in additional.findall('userParam')])
+                    mod_name = userParams.get('Name')
+                    pepObj.addModification(mod_aa, position, mod_name, mass)
+                self.peptides[spectrum] = pepObj
+            self.filename.seek(0)
+            dom1 = etree.iterparse(self.filename, tag=('spectrum',))
+            self.lxml = True
+        except NameError:
+            self.lxml = False
+            sys.stderr.write('mzData parsing unavailable: lxml is required to parse mzData files\n')
+            return
+        if self.lxml:
+            self.spectra = dom1
+            self.scans = {}
+            self.ra = {}
+        else:
+            #this isn't implemented
+            self.nest = 0
+        self.ptm_regex = re.compile(r'PTMProphet\_[A-Za-z]+([0-9\.\-]+)')
+        self.db = None
+
+    def __iter__(self):
+        return self
+
+    def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
+        if 'zlib compression' in params:
+            import zlib
+            array = zlib.decompress(base64.b64decode(array))
+        else:
+            array = base64.b64decode(array)
+        if params.get('precision', False) == '64':
+            array = [struct.unpack('d', array[i:i+8])[0] for i in xrange(0, len(array), 8)]
+        else:
+            array = [struct.unpack('f', array[i:i+4])[0] for i in xrange(0, len(array), 4)]
+        return array
+
+    def parselxml(self, spectra, full=False, namespace=''):
+        scanId = int(spectra.get('id'))
+        scanObj = self.peptides.pop(scanId, ScanObject)
+        precursorInfo = spectra.iterfind('spectrumDesc/precursorList/precursor/ionSelection')
+        for precursor in precursorInfo:
+            cvParams = dict([(j.get('name'),j.get('value')) for j in precursor.findall('cvParam')])
+            scanObj.rt = cvParams.get('retention time')
+        # get our search result
+        mzData = spectra.find('mzArrayBinary/data')
+        intData = spectra.find('intenArrayBinary/data')
+        mzData = self.unpack_array(mzData.text, dict(mzData.items()), namespace='')
+        intData = self.unpack_array(intData.text, dict(intData.items()), namespace='')
+        scanObj.scans = sorted([(i, j) for i,j in zip(mzData, intData)], key=operator.itemgetter(0))
+        if self.store:
+            self.scans[scanId] = scanObj
+        return scanObj
+
+    def next(self):
+        if self.spectra:
+            spectra = self.spectra.next()
+        else:
+            raise StopIteration
+        return self.parselxml(spectra[1])
+
+    def getScan(self, id):
+        try:
+            return self.scans[id]
+        except IndexError:
+            sys.stderr.write('mzData cannto find %s\n'%id)
             return None
 
 class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
