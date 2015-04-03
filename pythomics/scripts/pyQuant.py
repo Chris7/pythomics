@@ -6,8 +6,8 @@ from __future__ import division
 # interface with
 
 description = """
-This will quantify the SILAC peaks in ms1 spectra. It relies solely on the distance between peaks instead of
- the heavy pattern following the light pattern, which can correct for errors due to amino acid conversions.
+This will quantify labeled peaks (such as SILAC) in ms1 spectra. It relies solely on the distance between peaks,
+ which can correct for errors due to amino acid conversions.
 """
 
 import sys
@@ -255,15 +255,10 @@ class Worker(Process):
                     common_peaks = set(light['envelope']).intersection(set(heavy['envelope']))
                     for common_peak in common_peaks:
                         # light yields to heavy
-                        print 'yield yield yield', common_peak
-                        print light
-                        print heavy
                         common_index = light['envelope'].index(common_peak)
                         del light['envelope'][common_index]
                         del light['micro_envelopes'][common_index]
                         del light['ppms'][common_index-1]
-                        print light
-                        print heavy
 
 
                 start_mzs = [df.index[i[0]] for i in light['micro_envelopes']]
