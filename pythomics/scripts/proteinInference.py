@@ -313,15 +313,16 @@ def main():
         writer.writerow(header)
         for i in peptide_out:
             writer.writerow(i)
-    with motif_out as o:
-        writer = csv.writer(o, delimiter=delimiter)
-        header = ['Residue', 'Motif']
-        if inference:
-            header.append(inferred_name)
-        writer.writerow(header)
-        for peptide, peptide_dict in peptide_grouping.iteritems():
-            for motif_key, motif in peptide_dict['inference'].get('motifs', {}).iteritems():
-                writer.writerow([motif_key, motif, peptide_dict['inference']['proteins']])
+    if motif_search:
+        with motif_out as o:
+            writer = csv.writer(o, delimiter=delimiter)
+            header = ['Residue', 'Motif']
+            if inference:
+                header.append(inferred_name)
+            writer.writerow(header)
+            for peptide, peptide_dict in peptide_grouping.iteritems():
+                for motif_key, motif in peptide_dict['inference'].get('motifs', {}).iteritems():
+                    writer.writerow([motif_key, motif, peptide_dict['inference']['proteins']])
     stats['proteins_mapped'] = len(proteins_mapped)
     if inference:
         with args.protein_out as o:
