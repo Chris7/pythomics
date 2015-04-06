@@ -104,7 +104,7 @@ def main():
     if mod_site:
         case_sens = True
         inference = True
-    precursor_columns = [int(i) for i in args.precursors.split(',')] if args.precursors else None
+    precursor_columns = [i for i in args.precursors.split(',')] if args.precursors else None
     if ibaq:
         enzyme = digest.Enzyme( enzyme=args.enzyme )
     fasta_headers, protein_sequences = zip(*[(header.replace(';', ''), sequence) for header, sequence in fasta_file])
@@ -154,6 +154,10 @@ def main():
                             mod_col = i
                 if not precursor_columns:
                         precursor_columns = [i for i, v in enumerate(entry) if 'precursor' in v.lower()]
+                try:
+                    precursor_columns = [int(i) for i in precursor_columns]
+                except ValueError:
+                    precursor_columns = [entry.index(i) for i in precursor_columns]
                 if ibaq:
                     if normalize:
                         normalizations = [0 for i in precursor_columns]
@@ -282,7 +286,7 @@ def main():
                 precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
                 entry.append(precursor_int)
             for protein_index in mapped_info['indices']:
-                peptides = cleaved.get(protein_index,None)
+                peptides = cleaved.get(protein_index, None)
                 if peptides is None:
                     peptides = len(enzyme.cleave(ibaq_protein_sequence[protein_index], min=digest_min, max=digest_max))
                     cleaved[protein_index] = peptides
@@ -297,6 +301,7 @@ def main():
         if mod_site:
             # entry.append(';'.join(mod_site_additions))
             entry.append(peptide_dict['inference']['mod_sites'])
+        peptide_out.append(entry)
     with args.peptide_out as o:
         writer = csv.writer(o, delimiter=delimiter)
         header = ['Peptide', 'PSMS', 'Total Precursor Area']
@@ -313,15 +318,16 @@ def main():
         writer.writerow(header)
         for i in peptide_out:
             writer.writerow(i)
-    with motif_out as o:
-        writer = csv.writer(o, delimiter=delimiter)
-        header = ['Residue', 'Motif']
-        if inference:
-            header.append(inferred_name)
-        writer.writerow(header)
-        for peptide, peptide_dict in peptide_grouping.iteritems():
-            for motif_key, motif in peptide_dict['inference'].get('motifs', {}).iteritems():
-                writer.writerow([motif_key, motif, peptide_dict['inference']['proteins']])
+    if motif_search:
+        with motif_out as o:
+            writer = csv.writer(o, delimiter=delimiter)
+            header = ['Residue', 'Motif']
+            if inference:
+                header.append(inferred_name)
+            writer.writerow(header)
+            for peptide, peptide_dict in peptide_grouping.iteritems():
+                for motif_key, motif in peptide_dict['inference'].get('motifs', {}).iteritems():
+                    writer.writerow([motif_key, motif, peptide_dict['inference']['proteins']])
     stats['proteins_mapped'] = len(proteins_mapped)
     if inference:
         with args.protein_out as o:
@@ -373,7 +379,9 @@ def main():
                         entry.append(precursor_int)
                     peptides = cleaved.get(protein_index,None)
                     if peptides:
-                        entry.append(precursor_int/peptides)
+                        ibaq_value = precursor_int/peptides
+                        entry.append(ibaq_value)
+                        peptide_dict['inference']['iBAQ'] = ibaq_value
                     else:
                         entry.append('NA')
                 writer.writerow(entry)
@@ -392,6 +400,8 @@ def main():
                         entry.append('Peptide %s Position'%inferred_name)
                     if mod_site:
                         entry.append('Modification Position')
+                    if ibaq:
+                        entry.append('iBAQ')
                 else:
                     peptide = entry[peptide_column]
                     if not case_sens:
@@ -430,6 +440,8 @@ def main():
                                 modl.sort(key=lambda x: x[1])
                                 mod_entry.append('%s(%s)'%(mod_prot, ' '.join(['%s:%s'%(i,j) for i,j in modl])))
                             entry.append(';'.join(mod_entry))
+                        if ibaq:
+                            entry.append(d['inference'].get('iBAQ', 'NA'))
                 out_writer.writerow(entry)
         stats['modifications'] = mod_stats
     if args.mod_out:
