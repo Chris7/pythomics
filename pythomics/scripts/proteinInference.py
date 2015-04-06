@@ -94,7 +94,6 @@ def main():
     inferred_name = args.inferred_name
     digest_min = args.min
     digest_max = args.max
-    sys.stderr.write("Reading in Fasta file.\n")
     normalize = args.no_normalize
     ibaq = args.ibaq
     case_sens = args.case_sensitive
@@ -107,6 +106,7 @@ def main():
     precursor_columns = [i for i in args.precursors.split(',')] if args.precursors else None
     if ibaq:
         enzyme = digest.Enzyme( enzyme=args.enzyme )
+    sys.stderr.write("Reading in Fasta file.\n")
     fasta_headers, protein_sequences = zip(*[(header.replace(';', ''), sequence) for header, sequence in fasta_file])
     #replace headers with parsed ones
     if args.regex:
@@ -296,7 +296,7 @@ def main():
                 if not peptides:
                     ibaqs.append('NA')
                     continue
-                ibaqs.append(precursor_int/peptides)
+                ibaqs.append(precursor_int/peptides if peptides and precursor_int else 'NA')
             peptide_dict['inference']['iBAQ'] = ibaqs
             entry.append(';'.join(str(i) for i in ibaqs))
         if out_position:
@@ -371,7 +371,10 @@ def main():
                     peptide_psm_count.append((peptide,sum([len(d['intensities'][i]) for i in d['intensities']])))
                     intensities += [sum(d['intensities'][i]) for i in d['intensities']]
                     if ibaq and normalize:
-                        precursor_int += sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                        try:
+                            precursor_int += sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                        except decimal.InvalidOperation:
+                            pass
                 entry.append(';'.join(['%s(%s)' % (i,j) for i,j in peptide_psm_count]))
                 entry.append(sum(intensities))
                 if mod_site:
@@ -383,7 +386,7 @@ def main():
                         entry.append(precursor_int)
                     peptides = cleaved.get(protein_index,None)
                     if peptides:
-                        ibaq_value = precursor_int/peptides
+                        ibaq_value = precursor_int/peptides if peptides and precursor_int else 'NA'
                         entry.append(ibaq_value)
                     else:
                         entry.append('NA')
