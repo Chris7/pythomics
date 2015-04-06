@@ -283,7 +283,10 @@ def main():
             ibaqs = []
             intensities = [sum(d['intensities'][i]) for i in d['intensities']]
             if normalize:
-                precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                try:
+                    precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                except decimal.InvalidOperation:
+                    precursor_int = 0
                 entry.append(precursor_int)
             for protein_index in mapped_info['indices']:
                 peptides = cleaved.get(protein_index, None)
@@ -294,6 +297,7 @@ def main():
                     ibaqs.append('NA')
                     continue
                 ibaqs.append(precursor_int/peptides)
+            peptide_dict['inference']['iBAQ'] = ibaqs
             entry.append(';'.join(str(i) for i in ibaqs))
         if out_position:
             # entry.append(','.join(str(i[1]) for i in indices))
@@ -381,7 +385,6 @@ def main():
                     if peptides:
                         ibaq_value = precursor_int/peptides
                         entry.append(ibaq_value)
-                        peptide_dict['inference']['iBAQ'] = ibaq_value
                     else:
                         entry.append('NA')
                 writer.writerow(entry)
@@ -441,7 +444,7 @@ def main():
                                 mod_entry.append('%s(%s)'%(mod_prot, ' '.join(['%s:%s'%(i,j) for i,j in modl])))
                             entry.append(';'.join(mod_entry))
                         if ibaq:
-                            entry.append(d['inference'].get('iBAQ', 'NA'))
+                            entry.append(';'.join(d['inference'].get('iBAQ', [])))
                 out_writer.writerow(entry)
         stats['modifications'] = mod_stats
     if args.mod_out:
