@@ -447,7 +447,7 @@ def main():
                                 mod_entry.append('%s(%s)'%(mod_prot, ' '.join(['%s:%s'%(i,j) for i,j in modl])))
                             entry.append(';'.join(mod_entry))
                         if ibaq:
-                            entry.append(';'.join(d['inference'].get('iBAQ', [])))
+                            entry.append(';'.join([str(i) for i in d['inference'].get('iBAQ', [])]))
                 out_writer.writerow(entry)
         stats['modifications'] = mod_stats
     if args.mod_out:
