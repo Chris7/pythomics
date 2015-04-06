@@ -17,7 +17,7 @@ import traceback
 import pandas as pd
 import numpy as np
 import re
-import pylab
+from matplotlib import pyplot as plt
 from multiprocessing import Process, Queue
 from profilestats import profile
 from Queue import Empty
@@ -277,7 +277,7 @@ class Worker(Process):
                 if self.debug or self.html:
                     if self.debug:
                         pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
-                        pylab.figure()
+                        plt.figure()
 
                     light_x = []
                     light_y = []
@@ -310,10 +310,10 @@ class Worker(Process):
                     fig.clf()
 
 
-                    pylab.figure()
-                    ax = pylab.plot(light_x, light_y, color='b')
+                    plt.figure()
+                    ax = plt.plot(light_x, light_y, color='b')
                     if quant:
-                        ax = pylab.plot(heavy_x, heavy_y, color='r')
+                        ax = plt.plot(heavy_x, heavy_y, color='r')
                     fig = ax[0].get_figure()
                     if self.debug:
                         pdf.savefig(figure=fig)
@@ -343,6 +343,21 @@ class Worker(Process):
                 if quant:
                     heavy_data = scan_block.query(heavy_query).fillna(0).sum()
 
+                if self.debug:
+                    from matplotlib import cm
+                    from mpl_toolkits.mplot3d.axes3d import Axes3D
+                    fig = plt.figure(figsize=(14,6))
+                    res = scan_block[(scan_block.values > 100) == True].dropna(how='all').fillna(0)
+
+                    X,Y = np.meshgrid(res.index.values, res.columns.values)
+                    Z = res.values.T
+
+                    # surface_plot with color grading and color bar
+                    ax = fig.add_subplot(1, 2, 2, projection='3d')
+                    p = ax.plot_surface(X, Y, Z, rstride=50, cstride=10, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+                    cb = fig.colorbar(p, shrink=0.5)
+                    pdf.savefig(figure=ax.get_figure())
+
                 del scan_block
 
                 amp = light_data.max()
@@ -364,11 +379,11 @@ class Worker(Process):
                 fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
                 light_int = integrate.quad(fit, mu-6*opt_std, mu+6*opt_std)[0]
                 if self.debug or self.html:
-                    pylab.figure()
+                    plt.figure()
                     ax = light_data.plot(color='b', title=str(light_int))
                     pd.Series(dict(zip(X, fit(X)+opt_offset))).plot(color='r')
-                    pylab.plot([rt, rt], [0, (amp-opt_offset)], color='k')
-                    pylab.plot([mu, mu], [0, (amp-opt_offset)], color='r')
+                    plt.plot([rt, rt], [0, (amp-opt_offset)], color='k')
+                    plt.plot([mu, mu], [0, (amp-opt_offset)], color='r')
                     if self.debug:
                         pdf.savefig(figure=ax.get_figure())
                     if self.html:
@@ -399,11 +414,11 @@ class Worker(Process):
                     heavy_rats = [df.iloc[v]/df.iloc[heavy['envelope'][i]] for i,v in enumerate(heavy['envelope'][1:])]
                     cluster_rat = sum([(i-v) for i, v in zip(light_rats, heavy_rats[:-1])])
                     if self.debug or self.html:
-                        pylab.figure()
+                        plt.figure()
                         ax = heavy_data.plot(color='b', title=str(heavy_int))
                         pd.Series(dict(zip(X, fit(X)+opt_offset))).plot(color='r')
-                        pylab.plot([rt, rt], [0, (amp-opt_offset)], color='k')
-                        pylab.plot([mu, mu], [0, (amp-opt_offset)], color='r')
+                        plt.plot([rt, rt], [0, (amp-opt_offset)], color='k')
+                        plt.plot([mu, mu], [0, (amp-opt_offset)], color='r')
                         if self.debug:
                             pdf.savefig(figure=ax.get_figure())
                         if self.html:
@@ -411,7 +426,7 @@ class Worker(Process):
                             ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
                             html_images['heavy_rt'] = os.path.join(self.html['rel'], fname)
                         ax.get_figure().clf()
-                        pylab.close('all')
+                        plt.close('all')
 
 
                 if self.debug:
