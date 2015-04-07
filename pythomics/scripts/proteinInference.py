@@ -54,6 +54,19 @@ cache = {}
 proteins = []
 fasta_headers = []
 protein_sequences = ''
+IBAQ_NORMALIZATION = decimal.Decimal(1e6)
+# the number of peptides we map per core
+peptides_per_core = 100
+maps_done = 0
+
+def progress_update(a, b):
+    sys.stderr.write('\r{0:2.2f}% Completed'.format(a/b*100))
+    sys.stderr.flush()
+
+def progress_finish():
+    sys.stderr.write('\r100% Completed')
+    sys.stderr.flush()
+    sys.stderr.write('\n')
 
 def mapper(peptides):
     peptidestring = '(%s)'%'|'.join([i.upper() for i in peptides])
@@ -70,6 +83,14 @@ def mapper(peptides):
             'positions': [i[1] for i in indices],
             'indices': [i[0] for i in indices],
             'matches': [match for peptide, match in pg]
+        }
+    # handle the unmatched ones
+    for peptide in set(peptides)-set(matched.keys()):
+        matched[peptide] = {
+            'proteins': [],
+            'positions': [],
+            'indices': [],
+            'matches': []
         }
     return matched
 
@@ -167,21 +188,16 @@ def main():
                 if not case_sens:
                     peptide = peptide.upper()
                 pep_set.add(peptide)
+                if peptide not in peptide_history:
+                    peptide_history[peptide] = {
+                        'intensities': dict([(i, set([])) for i in xrange(len(precursor_columns))]),
+                    }
                 for n_i, e_i in enumerate(precursor_columns):
                     if entry[e_i]:
                         intensity = decimal.Decimal(entry[e_i])
-                        try:
-                            peptide_history[peptide]['intensities'][n_i].add(intensity)
-                        except KeyError:
-                            peptide_history[peptide] = {'intensities': {}}
-                            for i in xrange(len(precursor_columns)):
-                                peptide_history[peptide]['intensities'][i] = set([])
-                            peptide_history[peptide]['intensities'][n_i].add(intensity)
+                        peptide_history[peptide]['intensities'][n_i].add(intensity)
                 if mod_col is not None:
-                    try:
-                        peptide_history[peptide]['mod_col'] = entry[mod_col]
-                    except KeyError:
-                        peptide_history[peptide] = {'mod_col': entry[mod_col], 'intensities': {}}
+                    peptide_history[peptide]['mod_col'] = entry[mod_col]
         if ibaq and normalize:
             for peptide in peptide_history:
                 for i, v in peptide_history[peptide]['intensities'].iteritems():
@@ -192,12 +208,23 @@ def main():
     # map our peptides is a multi-cored manner
     pool = Pool(cores)
     # get our matches
-    plen = 100#len(peptide_history)/cores+1
+
     peptides = peptide_history.keys()
     # break into groups of 100 (empirically gives fastest mapping)
-    subpeptides = [peptides[n:n+plen] for n in xrange(0, len(peptides), plen)]
-    results = pool.map(mapper, subpeptides)
-    mapped_peptides = dict((k, v) for d in results for (k, v) in d.items())
+    subpeptides = [peptides[n:n+peptides_per_core] for n in xrange(0, len(peptides), peptides_per_core)]
+    num_peps = len(peptides)
+
+    def pool_monitor(res):
+        global maps_done
+        maps_done += len(res[0])
+        progress_update(maps_done, num_peps)
+    progress_finish()
+
+
+    sys.stderr.write('Mapping Peptides.\n')
+    results = pool.map_async(mapper, subpeptides, callback=pool_monitor)
+    mapped_peptides = dict((k, v) for d in results.get() for (k, v) in d.items())
+    sys.stderr.write('\nPeptides mapped.\n')
 
     protein_grouping = {}
     peptide_grouping = {}
@@ -212,8 +239,8 @@ def main():
         except KeyError:
             peptide_dict = {'intensities': {}}
             peptide_grouping[peptide] = peptide_dict
-        if not index%1000:
-            sys.stderr.write('%d of %d complete.\n' % (index, len(peptide_history)))
+        if not index%100:
+            progress_update(index, len(peptide_history))
         mapped_info = mapped_peptides.get(peptide.upper(), empty_dict)
         precursor_int = float(sum([sum(d['intensities'][i]) for i in d['intensities']]))
         entry = [peptide, sum([len(d['intensities'][i]) for i in d['intensities']]), precursor_int]
@@ -294,10 +321,10 @@ def main():
                     peptides = len(enzyme.cleave(ibaq_protein_sequence[protein_index], min=digest_min, max=digest_max))
                     cleaved[protein_index] = peptides
                 if not peptides:
-                    ibaqs.append('NA')
+                    ibaqs.append(0)
                     continue
-                ibaqs.append(precursor_int/peptides if peptides and precursor_int else 'NA')
-            peptide_dict['inference']['iBAQ'] = ibaqs
+                ibaqs.append(precursor_int/peptides if peptides and precursor_int else 0)
+            peptide_dict['inference']['iBAQ'] = [int(IBAQ_NORMALIZATION*i) for i in ibaqs]
             entry.append(';'.join(str(i) for i in ibaqs))
         if out_position:
             # entry.append(','.join(str(i[1]) for i in indices))
@@ -306,6 +333,7 @@ def main():
             # entry.append(';'.join(mod_site_additions))
             entry.append(peptide_dict['inference']['mod_sites'])
         peptide_out.append(entry)
+    progress_finish()
     with args.peptide_out as o:
         writer = csv.writer(o, delimiter=delimiter)
         header = ['Peptide', 'PSMS', 'Total Precursor Area']
@@ -385,11 +413,8 @@ def main():
                     if normalize:
                         entry.append(precursor_int)
                     peptides = cleaved.get(protein_index,None)
-                    if peptides:
-                        ibaq_value = precursor_int/peptides if peptides and precursor_int else 'NA'
-                        entry.append(ibaq_value)
-                    else:
-                        entry.append('NA')
+                    ibaq_value = int(IBAQ_NORMALIZATION*precursor_int/peptides) if peptides and precursor_int else 'NA'
+                    entry.append(ibaq_value)
                 writer.writerow(entry)
     tsv_file = open(tsv_file.name)
     with tsv_file as f:
@@ -468,9 +493,10 @@ def main():
     sys.stderr.write('Peptides Searched: %s\n'%stats['peptides'])
     sys.stderr.write('Unique Peptides Found: %s\n'%stats['peptides_found'])
     sys.stderr.write('%s Mapped to: %s\n'%(inferred_name, stats['proteins_mapped']))
-    sys.stderr.write('Modifications:\n')
-    for site, sites in stats['modifications'].iteritems():
-        sys.stderr.write('  %s: %s found with %d potential sites (%d mappings)\n'%(site, total_mods[site], len(sites), len(set([i[0] for i in sites]))))
+    if stats['modifications']:
+        sys.stderr.write('Modifications:\n')
+        for site, sites in stats['modifications'].iteritems():
+            sys.stderr.write('  %s: %s found with %d potential sites (%d mappings)\n'%(site, total_mods[site], len(sites), len(set([i[0] for i in sites]))))
 
 
 if __name__ == "__main__":
