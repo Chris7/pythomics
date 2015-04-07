@@ -1,5 +1,6 @@
 class ColumnFunctions(object):
     strict = False
+    METHODS = ['concat', 'mean', 'median', 'var', 'std', 'sum', 'count']
 
     def __init__(self, parser_args):
         if parser_args.strict:

@@ -132,4 +132,11 @@ class CustomParser(argparse.ArgumentParser):
     def add_processed_ms(self, help='The corresponding processed mass spectrometry files (ie .msf, .dat).'):
         self.add_argument('--processed', nargs='?', help=help, type=str)
 
+    def add_column_function(self, argument, group=None, help="The function to apply.", default='concat'):
+        adder = self
+        if group:
+            adder = group
+        from ..utils import ColumnFunctions
+        adder.add_argument(argument, help='{0} Options: {1}'.format(help, ', '.join(ColumnFunctions.METHODS)), default=default)
+
 

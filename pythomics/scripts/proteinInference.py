@@ -33,6 +33,7 @@ parser.add_argument('--no-inference', help="Do not append proteins inferred from
 group = parser.add_argument_group('iBAQ related options')
 group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true')
 group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", default=None)
+parser.add_column_function('--ibaq-function', group=group, help="The function to apply to entries with multiple iBAQ values.", default='concat')
 parser.add_enzyme()
 group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensity", action='store_false')
 protein_group = parser.add_argument_group('Protein Grouping Options')
@@ -158,6 +159,7 @@ def main():
             sys.stderr.write("You must provide an output name for motif-out if you are piping to stdout\n")
             return -1
     mod_col_func = getattr(correlator, args.mod_col_func, correlator.concat)
+    ibaq_col_func = getattr(correlator, args.ibaq_function, correlator.concat)
     with tsv_file as f:
         reader = csv.reader(f, delimiter=delimiter)
         for line_num, entry in enumerate(reader):
@@ -246,28 +248,26 @@ def main():
         entry = [peptide, sum([len(d['intensities'][i]) for i in d['intensities']]), precursor_int]
         if 'inference' not in peptide_dict:
             peptide_dict['inference'] = {'proteins': False}
-            # if inference or ibaq:
-                # sites = [match.start() for match in re.finditer(peptide.upper(), protein_sequences)]
-                # if out_position or mod_site:
-                #      indices = [(protein_sequences.count('\n', 0, match_position), match_position-protein_sequences[:match_position].rfind('\n')) for match_position in sites]
-                # else:
-                #      indices = [(protein_sequences.count('\n', 0, match_position), 0) for match_position in sites]
             if inference:
-                proteins = mapped_info['proteins']#[fasta_headers[i[0]] for i in indices]
+                proteins = mapped_info['proteins']
                 if mod_site:
-                    start_positions = mapped_info['positions']#[i[1] for i in indices]
+                    start_positions = mapped_info['positions']
                 proteins_mapped|=set(proteins)
                 matches = ';'.join(proteins)
                 if unique:
                     proteins = list(set(proteins))
-                if not unique or len(proteins) == 1:
-                    for protein_index, protein in enumerate(proteins):
-                        try:
-                            protein_grouping[protein][peptide] = d
-                        except KeyError:
-                            protein_grouping[protein] = {peptide: d}
-                entry.append(matches)
-                peptide_dict['inference']['proteins'] = matches
+                    if len(proteins) <= 1:
+                        peptide_dict['inference']['proteins'] = matches
+                        entry.append(matches)
+                else:
+                    peptide_dict['inference']['proteins'] = matches
+                    entry.append(matches)
+                for protein_index, protein in enumerate(proteins):
+                    try:
+                        protein_grouping[protein][peptide] = d
+                    except KeyError:
+                        protein_grouping[protein] = {peptide: d}
+
                 if mod_site:
                     mod_site_additions = []
                     motifs_found = {}
@@ -323,9 +323,15 @@ def main():
                 if not peptides:
                     ibaqs.append(0)
                     continue
+                # this divides the precursor intensity of the given peptide by the number of theoretically
+                #  possible cleaved peptides per protein.
+                # If the user is grouping things at a higher level, say the gene level this will output the ibaq
+                # per each mapped isoform if that gene has isoforms.
+                # if peptide.upper() == 'HMSFHAHVR':
+                #     import pdb; pdb.set_trace();
                 ibaqs.append(precursor_int/peptides if peptides and precursor_int else 0)
-            peptide_dict['inference']['iBAQ'] = [int(IBAQ_NORMALIZATION*i) for i in ibaqs]
-            entry.append(';'.join(str(i) for i in ibaqs))
+            peptide_dict['inference']['iBAQ'] = ibaq_col_func([int(IBAQ_NORMALIZATION*i) for i in ibaqs])
+            entry.append(peptide_dict['inference']['iBAQ'])
         if out_position:
             # entry.append(','.join(str(i[1]) for i in indices))
             entry.append(peptide_dict['inference']['matched_position'])
@@ -413,8 +419,8 @@ def main():
                     if normalize:
                         entry.append(precursor_int)
                     peptides = cleaved.get(protein_index,None)
-                    ibaq_value = int(IBAQ_NORMALIZATION*precursor_int/peptides) if peptides and precursor_int else 'NA'
-                    entry.append(ibaq_value)
+                    ibaq_value = [int(IBAQ_NORMALIZATION*precursor_int/peptides) if peptides and precursor_int else 0]
+                    entry.append(ibaq_col_func(ibaq_value))
                 writer.writerow(entry)
     tsv_file = open(tsv_file.name)
     with tsv_file as f:
@@ -472,7 +478,7 @@ def main():
                                 mod_entry.append('%s(%s)'%(mod_prot, ' '.join(['%s:%s'%(i,j) for i,j in modl])))
                             entry.append(';'.join(mod_entry))
                         if ibaq:
-                            entry.append(';'.join([str(i) for i in d['inference'].get('iBAQ', [])]))
+                            entry.append(d['inference'].get('iBAQ', 0))
                 out_writer.writerow(entry)
         stats['modifications'] = mod_stats
     if args.mod_out:
