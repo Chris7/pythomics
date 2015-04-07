@@ -83,7 +83,8 @@ def mapper(peptides):
             'proteins': found_proteins,
             'positions': [i[1] for i in indices],
             'indices': [i[0] for i in indices],
-            'matches': [match for peptide, match in pg]
+            'matches': [match for peptide, match in pg],
+            'unique': True,
         }
     # handle the unmatched ones
     for peptide in set(peptides)-set(matched.keys()):
@@ -91,7 +92,8 @@ def mapper(peptides):
             'proteins': [],
             'positions': [],
             'indices': [],
-            'matches': []
+            'matches': [],
+            'unique': True
         }
     return matched
 
@@ -234,7 +236,7 @@ def main():
     stats['peptides_found'] = len(pep_set)
     proteins_mapped = set([])
     peptide_out = []
-    empty_dict = {'proteins': '', 'positions': [], 'indices': [], 'matches': []}
+    empty_dict = {'proteins': '', 'positions': [], 'indices': [], 'matches': [], 'unique': True}
     for index, (peptide, d) in enumerate(peptide_history.iteritems()):
         try:
             peptide_dict = peptide_grouping[peptide]
@@ -247,21 +249,22 @@ def main():
         precursor_int = float(sum([sum(d['intensities'][i]) for i in d['intensities']]))
         entry = [peptide, sum([len(d['intensities'][i]) for i in d['intensities']]), precursor_int]
         if 'inference' not in peptide_dict:
-            peptide_dict['inference'] = {'proteins': False}
+            peptide_dict['inference'] = {'proteins': ''}
             if inference:
                 proteins = mapped_info['proteins']
                 if mod_site:
                     start_positions = mapped_info['positions']
                 proteins_mapped|=set(proteins)
-                matches = ';'.join(proteins)
                 if unique:
                     proteins = list(set(proteins))
-                    if len(proteins) <= 1:
-                        peptide_dict['inference']['proteins'] = matches
-                        entry.append(matches)
-                else:
-                    peptide_dict['inference']['proteins'] = matches
+                    if len(proteins) > 1:
+                        mapped_info['unique'] = False
+                matches = ';'.join(proteins)
+                peptide_dict['inference']['proteins'] = matches
+                if not unique or mapped_info['unique']:
                     entry.append(matches)
+                else:
+                    entry.append('')
                 for protein_index, protein in enumerate(proteins):
                     try:
                         protein_grouping[protein][peptide] = d
@@ -272,7 +275,7 @@ def main():
                     mod_site_additions = []
                     motifs_found = {}
                     find_motif = False
-                    if motif_search and len(proteins) == 1 or not motif_unique:
+                    if motif_search and (len(proteins) == 1 or not motif_unique):
                         find_motif = True
                     for start_position, protein in zip(start_positions, proteins):
                         mod_site_addition = []
@@ -330,14 +333,12 @@ def main():
                 # if peptide.upper() == 'HMSFHAHVR':
                 #     import pdb; pdb.set_trace();
                 ibaqs.append(precursor_int/peptides if peptides and precursor_int else 0)
-            peptide_dict['inference']['iBAQ'] = ibaq_col_func([int(IBAQ_NORMALIZATION*i) for i in ibaqs])
-            entry.append(peptide_dict['inference']['iBAQ'])
+            peptide_dict['inference']['iBAQ'] = ibaq_col_func([int(IBAQ_NORMALIZATION*i) for i in ibaqs]) if ibaqs else 0
+            entry.append(peptide_dict['inference']['iBAQ'] if not unique or mapped_info['unique'] else '')
         if out_position:
-            # entry.append(','.join(str(i[1]) for i in indices))
-            entry.append(peptide_dict['inference']['matched_position'])
+            entry.append(peptide_dict['inference']['matched_position'] if not unique or mapped_info['unique'] else '')
         if mod_site:
-            # entry.append(';'.join(mod_site_additions))
-            entry.append(peptide_dict['inference']['mod_sites'])
+            entry.append(peptide_dict['inference']['mod_sites'] if not unique or mapped_info['unique'] else '')
         peptide_out.append(entry)
     progress_finish()
     with args.peptide_out as o:
@@ -402,13 +403,14 @@ def main():
                                                 mod_aa, mod_prot_site = mod_prot_site[:-1].split(':')
                                                 mods.add((mod_aa, mod_prot_site))
                     d = protein_grouping[protein][peptide]
-                    peptide_psm_count.append((peptide,sum([len(d['intensities'][i]) for i in d['intensities']])))
-                    intensities += [sum(d['intensities'][i]) for i in d['intensities']]
-                    if ibaq and normalize:
-                        try:
-                            precursor_int += sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
-                        except decimal.InvalidOperation:
-                            pass
+                    if not unique or mapped_peptides.get(peptide, {}).get('unique'):
+                        peptide_psm_count.append((peptide,sum([len(d['intensities'][i]) for i in d['intensities']])))
+                        intensities += [sum(d['intensities'][i]) for i in d['intensities']]
+                        if ibaq and normalize:
+                            try:
+                                precursor_int += sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                            except decimal.InvalidOperation:
+                                pass
                 entry.append(';'.join(['%s(%s)' % (i,j) for i,j in peptide_psm_count]))
                 entry.append(sum(intensities))
                 if mod_site:
@@ -447,38 +449,41 @@ def main():
                     total_mods.update([k for k in peptide if k.islower()])
                     if d:
                         if inference:
-                            entry.append(d['inference']['proteins'])
+                            entry.append(d['inference']['proteins'] if not unique or mapped_peptides.get(peptide, {}).get('unique') else '')
                         if out_position:
-                            entry.append(d['inference']['matched_position'])
+                            entry.append(d['inference']['matched_position'] if not unique or mapped_peptides.get(peptide, {}).get('unique') else '')
                         if mod_site:
                             mod_proteins = d['inference']['mod_sites']
                             peptide_mods = {}
                             mod_entry = []
-                            for mod_protein in mod_proteins.split(';'):
-                                #mod protein looks like:
-                                mod_prots = mod_protein.split(';')
-                                for mod_prot_ in mod_prots:
-                                    if not mod_prot_:
-                                        continue
-                                    mod_prot, mod_prot_sites = mod_prot_.rsplit('(', 1)
-                                    for mod_prot_site in mod_prot_sites[:-1].split(','):
-                                        if mod_prot_site:
-                                            mod_aa, mod_prot_site = mod_prot_site.split(':')
-                                            try:
-                                                peptide_mods[mod_prot].add((mod_aa, mod_prot_site))
-                                            except KeyError:
-                                                peptide_mods[mod_prot] = set([(mod_aa, mod_prot_site)])
-                                            try:
-                                                mod_stats[mod_aa].add((mod_prot, mod_prot_site))
-                                            except KeyError:
-                                                mod_stats[mod_aa] = set([(mod_prot, mod_prot_site)])
-                            for mod_prot, mods in peptide_mods.iteritems():
-                                modl = list(mods)
-                                modl.sort(key=lambda x: x[1])
-                                mod_entry.append('%s(%s)'%(mod_prot, ' '.join(['%s:%s'%(i,j) for i,j in modl])))
+                            if not unique or mapped_peptides.get(peptide, {}).get('unique'):
+                                for mod_protein in mod_proteins.split(';'):
+                                    #mod protein looks like:
+                                    mod_prots = mod_protein.split(';')
+                                    for mod_prot_ in mod_prots:
+                                        if not mod_prot_:
+                                            continue
+                                        mod_prot, mod_prot_sites = mod_prot_.rsplit('(', 1)
+                                        for mod_prot_site in mod_prot_sites[:-1].split(','):
+                                            if mod_prot_site:
+                                                mod_aa, mod_prot_site = mod_prot_site.split(':')
+                                                try:
+                                                    peptide_mods[mod_prot].add((mod_aa, mod_prot_site))
+                                                except KeyError:
+                                                    peptide_mods[mod_prot] = set([(mod_aa, mod_prot_site)])
+                                                try:
+                                                    mod_stats[mod_aa].add((mod_prot, mod_prot_site))
+                                                except KeyError:
+                                                    mod_stats[mod_aa] = set([(mod_prot, mod_prot_site)])
+                                for mod_prot, mods in peptide_mods.iteritems():
+                                    modl = list(mods)
+                                    modl.sort(key=lambda x: x[1])
+                                    mod_entry.append('%s(%s)'%(mod_prot, ' '.join(['%s:%s'%(i,j) for i,j in modl])))
                             entry.append(';'.join(mod_entry))
                         if ibaq:
-                            entry.append(d['inference'].get('iBAQ', 0))
+                            entry.append(d['inference'].get('iBAQ', 0) if not unique or mapped_peptides.get(peptide, {}).get('unique') else 0)
+                # if peptide.upper() == 'HYNEAVKR':
+                #     import pdb; pdb.set_trace();
                 out_writer.writerow(entry)
         stats['modifications'] = mod_stats
     if args.mod_out:
