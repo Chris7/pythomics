@@ -137,8 +137,8 @@ def main():
         regex = re.compile(args.regex)
         fasta_headers = [regex.search(header) for header in fasta_headers]
         protein_sequences = [protein_sequences[i] for i, v in enumerate(fasta_headers) if v]
-        sys.stderr.write('{0} header sequences did not match regex {1} and have been discarded.\n'.format(len(fasta_headers)-len(protein_sequences), args.regex))
         fasta_headers = [' '.join(i.groups()) for i in fasta_headers if i]
+        sys.stderr.write('{0} header sequences did not match regex {1} and have been discarded.\n'.format(len(fasta_headers)-len(protein_sequences), args.regex))
     if ibaq:
         ibaq_protein_sequence = copy.deepcopy(protein_sequences)
         cleaved = {}

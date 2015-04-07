@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='pythomics',
-      version='0.2.00',
+      version='0.2.01',
       description='A multi-omic python package',
       url='https://github.com/pandeylab/pythomics',
       author='Chris Mitchell',
