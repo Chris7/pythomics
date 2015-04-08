@@ -321,7 +321,7 @@ def main():
             for protein_index in mapped_info['indices']:
                 peptides = cleaved.get(protein_index, None)
                 if peptides is None:
-                    peptides = len(enzyme.cleave(ibaq_protein_sequence[protein_index], min=digest_min, max=digest_max))
+                    peptides = sum([len(enzyme.cleave(ibaq_protein_sequence[possible_protein_index], min=digest_min, max=digest_max)) for possible_protein_index in mapped_info['indices']])
                     cleaved[protein_index] = peptides
                 if not peptides:
                     ibaqs.append(0)
