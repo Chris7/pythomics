@@ -35,7 +35,7 @@ group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requir
 group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", default=None)
 parser.add_column_function('--ibaq-function', group=group, help="The function to apply to entries with multiple iBAQ values.", default='concat')
 parser.add_enzyme()
-group.add_argument('--no-normalize', help="Don't normalize iBAQ to total intensity", action='store_false')
+group.add_argument('--normalize', help="Normalize iBAQ to total intensity of column (useful for comparing multiple samples).", action='store_true')
 protein_group = parser.add_argument_group('Protein Grouping Options')
 protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true')
 protein_group.add_argument('--position', help="Write the position of the peptide matches.", action='store_true')
@@ -118,7 +118,7 @@ def main():
     inferred_name = args.inferred_name
     digest_min = args.min
     digest_max = args.max
-    normalize = args.no_normalize
+    normalize = args.normalize
     ibaq = args.ibaq
     case_sens = args.case_sensitive
     mod_site = args.modification_site
@@ -183,9 +183,7 @@ def main():
                     precursor_columns = [int(i) for i in precursor_columns]
                 except ValueError:
                     precursor_columns = [entry.index(i) for i in precursor_columns]
-                if ibaq:
-                    if normalize:
-                        normalizations = [0 for i in precursor_columns]
+                normalizations = [0 for i in precursor_columns]
             else:
                 peptide = entry[peptide_column]
                 pep_count+=1
@@ -207,7 +205,7 @@ def main():
                 for i, v in peptide_history[peptide]['intensities'].iteritems():
                     normalizations[i] += sum(v)
         else:
-            normalizations = [1 for peptide in peptide_history for intensities in peptide_history[peptide]['intensities']]
+            normalizations = [decimal.Decimal(1) for i in normalizations]
 
     # map our peptides is a multi-cored manner
     pool = Pool(cores)
@@ -312,12 +310,11 @@ def main():
         if ibaq:
             ibaqs = []
             intensities = [sum(d['intensities'][i]) for i in d['intensities']]
-            if normalize:
-                try:
-                    precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
-                except decimal.InvalidOperation:
-                    precursor_int = 0
-                entry.append(precursor_int)
+            try:
+                precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+            except decimal.InvalidOperation:
+                precursor_int = 0
+            entry.append(precursor_int)
             for protein_index in mapped_info['indices']:
                 peptides = cleaved.get(protein_index, None)
                 if peptides is None:
