@@ -129,7 +129,7 @@ def main():
         inference = True
     precursor_columns = [i for i in args.precursors.split(',')] if args.precursors else None
     if ibaq:
-        enzyme = digest.Enzyme( enzyme=args.enzyme )
+        enzyme = digest.Enzyme(enzyme=args.enzyme[0] if isinstance(args.enzyme, list) else args.enzyme)
     sys.stderr.write("Reading in Fasta file.\n")
     fasta_headers, protein_sequences = zip(*[(header.replace(';', ''), sequence) for header, sequence in fasta_file])
     #replace headers with parsed ones
@@ -294,14 +294,15 @@ def main():
                                         motif_sequence = motif_sequence[:motif_pos+cut]
                                     motifs_found[mod_key] = motif_sequence
                                 mod_site_addition.append(mod_key)
-                                try:
-                                    mod_grouping[protein][mod_key]['values'].add(d['mod_col'])
-                                    mod_grouping[protein][mod_key]['peptides'].add(peptide)
-                                except KeyError:
+                                if mod_col:
                                     try:
-                                        mod_grouping[protein][mod_key] = {'values': set([d['mod_col']]), 'peptides': set([peptide])}
+                                        mod_grouping[protein][mod_key]['values'].add(d['mod_col'])
+                                        mod_grouping[protein][mod_key]['peptides'].add(peptide)
                                     except KeyError:
-                                        mod_grouping[protein] = {mod_key: {'values': set([d['mod_col']]), 'peptides': set([peptide])}}
+                                        try:
+                                            mod_grouping[protein][mod_key] = {'values': set([d['mod_col']]), 'peptides': set([peptide])}
+                                        except KeyError:
+                                            mod_grouping[protein] = {mod_key: {'values': set([d['mod_col']]), 'peptides': set([peptide])}}
                         mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
                     peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
                     peptide_dict['inference']['motifs'] = motifs_found
