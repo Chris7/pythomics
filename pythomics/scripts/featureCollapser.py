@@ -3,8 +3,11 @@
 __author__ = 'chris'
 
 description = """
-This script will take a delimited file and collapse features together, such
-as scan numbers. It can also be used to group peptides into longer sequences
+This script will take a delimited file and collapse features together, optionally
+creating summary statistics for them.
+
+For instance, gene ids can be selected and their FPKM/iBAQ values combined.
+Also, features can be can be grouped into longer sequences
 with the --substring flag (ex: peptides LNGERPEPTIDE and ERPEPT will be merged
 into LNGERPEPTIDE).
 """
@@ -20,8 +23,7 @@ parser = CustomParser(description = description)
 parser.add_delimited_file()
 parser.add_out()
 parser.add_argument('--substring', help='If set, merge features by partial matches (such as collapsing peptides into larger peptides)', action='store_true')
-parser.add_argument('--mod-col', help="The column to apply a function to (if you want to combine fields, sum fields, etc.).", type=str)
-parser.add_argument('--mod-col-func', help="The function to apply to grouped entries in modification columns.", type=str, default='concat')
+parser.add_column_function('--mod-col', col_help="The function to apply to grouped entries in modification columns.")
 parser.add_argument('--strict', help='For numeric operations, fail if types are incorrect (converting NA to a float for instance).', action='store_true')
 # parser.add_argument('--merge-columns', help="If set, columns of merged peptides will be combined.", action='store_true')
 # parser.add_argument('--merge-delimiter', help='The delimiter for column merges.', type=str, default=';')
@@ -38,10 +40,13 @@ def main():
         peptide_column = args.col
     tsv_file = args.tsv
     header_lines = args.header
-    delimiter = args.delimiter
+    delimiters = ''.join(list(set([',','\t',args.delimiter])))
     peptide_join = args.substring
     col_func = ColumnFunctions(args)
-    mod_col = int(args.mod_col)-1 if args.mod_col else False
+    try:
+        mod_col = int(args.mod_col)-1 if args.mod_col else False
+    except ValueError:
+        mod_col = None
     mod_col_func = getattr(col_func, args.mod_col_func, col_func.concat)
     # col_delimiter = args.merge_delimiter
     # merge_columns = args.merge_columns
@@ -49,7 +54,9 @@ def main():
     peptide_history = {}
     headers = []
     with tsv_file as f:
-        reader = csv.reader(f, delimiter=delimiter)
+        dialect = csv.Sniffer().sniff(f.read(1024), delimiters=delimiters)
+        f.seek(0)
+        reader = csv.reader(f, dialect)
         for line_num, entry in enumerate(reader):
             if line_num < header_lines:
                 headers.append(entry)
@@ -57,6 +64,11 @@ def main():
                     for i, v in enumerate(entry):
                         if v.lower() == peptide_column.lower():
                             peptide_column = i
+                            break
+                if mod_col is None:
+                    for i, v in enumerate(entry):
+                        if v.lower() == args.mod_col.lower():
+                            mod_col = i
                             break
             else:
                 peptide = entry[peptide_column]
@@ -97,7 +109,7 @@ def main():
                     peptide_history[matching_peptide].append(peptide_history[peptide])
             del peptide_history[peptide]
     with args.out as o:
-        writer = csv.writer(o, delimiter=delimiter)
+        writer = csv.writer(o, dialect=dialect)
         for i in headers:
             writer.writerow(i)
         for index, (peptide, entries) in enumerate(peptide_history.iteritems()):
