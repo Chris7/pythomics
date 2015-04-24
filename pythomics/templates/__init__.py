@@ -84,7 +84,7 @@ class CustomParser(argparse.ArgumentParser):
         self.add_argument(*header, help="The number of headers lines (default: 1).", type=int, default=1)
 
     def add_fasta(self, help="The fasta file to operate on."):
-        self.add_argument('-f', '--fasta', nargs='?', help=help, type=argparse.FileType('r'))
+        self.add_argument('-f', '--fasta', nargs='?', help=help, type=argparse.FileType('r'), required=True)
 
     def add_read_pair(self):
         self.add_argument('--left', help="The left (5') read pairs", nargs='?', type=argparse.FileType('r'))
@@ -130,13 +130,20 @@ class CustomParser(argparse.ArgumentParser):
         self.add_argument('--raw', nargs='?', help=help, type=str)
 
     def add_processed_ms(self, help='The corresponding processed mass spectrometry files (ie .msf, .dat).'):
-        self.add_argument('--processed', nargs='?', help=help, type=str)
+        self.add_argument('--processed', help=help, type=argparse.FileType('r'), required=True)
 
-    def add_column_function(self, argument, group=None, help="The function to apply.", default='concat'):
+    def add_column_function(self, argument,
+                            help="The column to apply a function to (if you want to combine fields, sum fields, etc.).",
+                            col_argument=None, group=None, col_help="The function to apply.", col_default='concat', parent=True):
         adder = self
         if group:
             adder = group
         from ..utils import ColumnFunctions
-        adder.add_argument(argument, help='{0} Options: {1}'.format(help, ', '.join(ColumnFunctions.METHODS)), default=default)
+        if col_argument is None:
+            col_argument = '{}-func'.format(argument)
+        if parent:
+            adder.add_argument(argument, help=help, type=str)
+        adder.add_argument(col_argument, help='{0} Options: {1}'.format(col_help, ', '.join(ColumnFunctions.METHODS)),
+                           type=str, choices=ColumnFunctions.METHODS, default=col_default)
 
 
