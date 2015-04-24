@@ -22,26 +22,27 @@ parser.add_fasta(help="The fasta file to match peptides against.")
 parser.add_out(help="The name of the file you wish to create with results appended.")
 parser.add_argument('--peptide-out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=os.devnull)
 parser.add_argument('--protein-out', nargs='?', help="The file to write grouped products to.", type=argparse.FileType('w'), default=os.devnull)
-parser.add_argument('--mod-out', nargs='?', help="The file to write a modification-centric summary to.", type=argparse.FileType('w'), default=os.devnull)
-parser.add_argument('--mod-col', help="The column to append for modifications (if you want to report ratios, etc.).", type=str)
-parser.add_argument('--mod-col-func', help="The function to apply to grouped entries in modification columns.", type=str, default='concat')
 parser.add_argument('--strict', help='For numeric operations, fail if types are incorrect (converting NA to a float for instance).', action='store_true')
 parser.add_delimited_file()
 parser.add_argument('-r', '--regex', help="A perl regular expression determining which parts of the header to capture.", type=str)
 parser.add_argument('--inferred-name', help="The name you want to assign for protein inference (in case you are regexing for gene names or something).", type=str, default='Proteins')
-parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_false')
-group = parser.add_argument_group('iBAQ related options')
-group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true')
-group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", default=None)
-parser.add_column_function('--ibaq-function', group=group, help="The function to apply to entries with multiple iBAQ values.", default='concat')
-parser.add_enzyme()
-group.add_argument('--normalize', help="Normalize iBAQ to total intensity of column (useful for comparing multiple samples).", action='store_true')
+parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_true')
+parser.add_argument('--no-equality', help="Do not consider Leucine and Isoleucine equal for peptide mapping.", action='store_true')
+ibaq_group = parser.add_argument_group('iBAQ related options')
+ibaq_group.add_argument('--ibaq', help="Provide to append iBAQ values as well (requires protein inference).", action='store_true')
+ibaq_group.add_argument('--precursors', help="The column with precursor area (defaults to header lines containing 'Precursor').", type=str)
+parser.add_column_function('', col_argument='--ibaq-function', group=ibaq_group, col_help="The function to apply to groups of iBAQ values (for multiple peptide matches).", parent=False)
+ibaq_group.add_argument('--non-redundant', help="Use only non-redundant theoretical tryptic peptides for the iBAQ denominator.", action='store_true')
+parser.add_enzyme(help="The enzyme used to digest the sample.")
+ibaq_group.add_argument('--normalize', help="Normalize iBAQ to total intensity of column (useful for comparing multiple samples).", action='store_true')
 protein_group = parser.add_argument_group('Protein Grouping Options')
 protein_group.add_argument('--unique-only', help="Only group proteins with unique peptides", action='store_true')
 protein_group.add_argument('--position', help="Write the position of the peptide matches.", action='store_true')
 protein_group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true')
 mod_group = parser.add_argument_group('Peptide Modification Options')
+mod_group.add_argument('--mod-out', nargs='?', help="The file to write a modification-centric summary to.", type=argparse.FileType('w'), default=os.devnull)
 mod_group.add_argument('--modification-site', help="Write the position in the parent protein of the modification (requires case-sensitive and modifications being lower-cased).", action='store_true')
+parser.add_column_function('--mod-col', help="The column containing modification information.", group=mod_group)
 motif_group = mod_group.add_argument_group('Motif Options')
 motif_group.add_argument('--motifs', help="Enable creation of motifs for each modification.", action='store_true')
 motif_group.add_argument('--motif-window', help="The width of the motif window (how many residues to go out from each modification).", type=int, default=10)
@@ -50,7 +51,9 @@ motif_group.add_argument('--motif-out', help="Where to save the file with motifs
 
 
 global protein_sequences
+global protein_sequences_converted
 global fasta_headers
+global il_convert
 cache = {}
 proteins = []
 fasta_headers = []
@@ -69,8 +72,13 @@ def progress_finish():
     sys.stderr.flush()
     sys.stderr.write('\n')
 
+def make_unique(l):
+    seen = set()
+    return [x for x in l if x not in seen and not seen.add(x)]
+    #return list(OrderedDict.fromkeys(l))
+
 def mapper(peptides):
-    peptidestring = '(%s)'%'|'.join([i.upper() for i in peptides])
+    peptidestring = '(%s)'%'|'.join([i.upper().replace('I', '!').replace('L', '!').replace('!', '[IL]') if il_convert else i.upper() for i in peptides])
     matches = [(i.group(1), i.start()) for i in re.finditer(peptidestring, protein_sequences)]
     matches.sort(key=lambda x: x[0])
     groups = itertools.groupby(matches, key=lambda x: x[0])
@@ -78,7 +86,7 @@ def mapper(peptides):
     for peptide, peptide_grouped in groups:
         pg = list(peptide_grouped)
         indices = [(protein_sequences.count('\n', 0, match), match-protein_sequences[:match].rfind('\n')) for peptide, match in pg]
-        found_proteins = list(set([fasta_headers[i[0]] for i in indices]))
+        found_proteins = make_unique([fasta_headers[i[0]] for i in indices])
         matched[peptide] = {
             'proteins': found_proteins,
             'positions': [i[1] for i in indices],
@@ -102,6 +110,7 @@ def mapper(peptides):
 def main():
     global protein_sequences
     global fasta_headers
+    global il_convert
     peptides_mapped = Value('i', 0)
     args = parser.parse_args()
     cores = args.p
@@ -111,15 +120,17 @@ def main():
     except:
         peptide_column = None
     tsv_file = args.tsv
+    il_convert = not args.no_equality
     out_file = args.out
     header_lines = args.header
     delimiter = args.delimiter
-    inference = args.no_inference
+    inference = not args.no_inference
     inferred_name = args.inferred_name
     digest_min = args.min
     digest_max = args.max
     normalize = args.normalize
     ibaq = args.ibaq
+    ibaq_redunant = not args.non_redundant
     case_sens = args.case_sensitive
     mod_site = args.modification_site
     unique = args.unique_only
@@ -158,7 +169,7 @@ def main():
         elif args.out:
             motif_out = open('{0}_motif'.format(args.out.name), 'wb')
         else:
-            sys.stderr.write("You must provide an output name for motif-out if you are piping to stdout\n")
+            sys.stderr.write("You must provide an output name for motif-out if you are piping to stdout.\n")
             return -1
     mod_col_func = getattr(correlator, args.mod_col_func, correlator.concat)
     ibaq_col_func = getattr(correlator, args.ibaq_function, correlator.concat)
@@ -194,13 +205,14 @@ def main():
                     peptide_history[peptide] = {
                         'intensities': dict([(i, set([])) for i in xrange(len(precursor_columns))]),
                     }
-                for n_i, e_i in enumerate(precursor_columns):
-                    if entry[e_i]:
-                        intensity = decimal.Decimal(entry[e_i])
-                        peptide_history[peptide]['intensities'][n_i].add(intensity)
+                if precursor_columns:
+                    for n_i, e_i in enumerate(precursor_columns):
+                        if entry[e_i]:
+                            intensity = decimal.Decimal(entry[e_i])
+                            peptide_history[peptide]['intensities'][n_i].add(intensity)
                 if mod_col is not None:
                     peptide_history[peptide]['mod_col'] = entry[mod_col]
-        if ibaq and normalize:
+        if ibaq and normalize and precursor_columns:
             for peptide in peptide_history:
                 for i, v in peptide_history[peptide]['intensities'].iteritems():
                     normalizations[i] += sum(v)
@@ -254,7 +266,7 @@ def main():
                     start_positions = mapped_info['positions']
                 proteins_mapped|=set(proteins)
                 if unique:
-                    proteins = list(set(proteins))
+                    proteins = make_unique(proteins)
                     if len(proteins) > 1:
                         mapped_info['unique'] = False
                 matches = ';'.join(proteins)
@@ -300,9 +312,9 @@ def main():
                                         mod_grouping[protein][mod_key]['peptides'].add(peptide)
                                     except KeyError:
                                         try:
-                                            mod_grouping[protein][mod_key] = {'values': set([d['mod_col']]), 'peptides': set([peptide])}
+                                            mod_grouping[protein][mod_key] = {'values': make_unique(d['mod_col']), 'peptides': make_unique(peptide)}
                                         except KeyError:
-                                            mod_grouping[protein] = {mod_key: {'values': set([d['mod_col']]), 'peptides': set([peptide])}}
+                                            mod_grouping[protein] = {mod_key: {'values': make_unique(d['mod_col']), 'peptides': make_unique(peptide)}}
                         mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
                     peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
                     peptide_dict['inference']['motifs'] = motifs_found
@@ -319,7 +331,11 @@ def main():
             for protein_index in mapped_info['indices']:
                 peptides = cleaved.get(protein_index, None)
                 if peptides is None:
-                    peptides = sum([len(enzyme.cleave(ibaq_protein_sequence[possible_protein_index], min=digest_min, max=digest_max)) for possible_protein_index in mapped_info['indices']])
+                    if ibaq_redunant:
+                        peptides = sum([len(enzyme.cleave(ibaq_protein_sequence[possible_protein_index], min=digest_min, max=digest_max)) for possible_protein_index in mapped_info['indices']])
+                    else:
+                        peptides = len(set([peptide for tryptic_peptides in [enzyme.cleave(ibaq_protein_sequence[possible_protein_index], min=digest_min, max=digest_max) for possible_protein_index in mapped_info['indices']]
+                                            for peptide in tryptic_peptides]))
                     cleaved[protein_index] = peptides
                 if not peptides:
                     ibaqs.append(0)
