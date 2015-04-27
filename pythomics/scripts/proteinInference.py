@@ -308,13 +308,16 @@ def main():
                                 mod_site_addition.append(mod_key)
                                 if mod_col:
                                     try:
-                                        mod_grouping[protein][mod_key]['values'].add(d['mod_col'])
-                                        mod_grouping[protein][mod_key]['peptides'].add(peptide)
+                                        mod_values = mod_grouping[protein][mod_key]['values']
+                                        mod_peptides = mod_grouping[protein][mod_key]['peptides']
+                                        mod_values.append(d['mod_col'])
+                                        mod_grouping[protein][mod_key]['values'] = make_unique(mod_values)
+                                        mod_grouping[protein][mod_key]['peptides'] = make_unique(mod_peptides+[peptide])
                                     except KeyError:
                                         try:
-                                            mod_grouping[protein][mod_key] = {'values': make_unique(d['mod_col']), 'peptides': make_unique(peptide)}
+                                            mod_grouping[protein][mod_key] = {'values': make_unique([d['mod_col']]), 'peptides': make_unique([peptide])}
                                         except KeyError:
-                                            mod_grouping[protein] = {mod_key: {'values': make_unique(d['mod_col']), 'peptides': make_unique(peptide)}}
+                                            mod_grouping[protein] = {mod_key: {'values': make_unique([d['mod_col']]), 'peptides': make_unique([peptide])}}
                         mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
                     peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
                     peptide_dict['inference']['motifs'] = motifs_found
