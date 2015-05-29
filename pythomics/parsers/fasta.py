@@ -2,10 +2,10 @@ import os, re, sys
 import pythomics.templates as templates, config
 
 def _reverse_complement(seq):
-    return ''.join([config.BASE_PAIR_COMPLEMENTS[i] for i in reversed(seq)])
+    return ''.join([config.BASE_PAIR_COMPLEMENTS.get(i, 'N') for i in reversed(seq)])
 
 def _complement(seq):
-    return ''.join([config.BASE_PAIR_COMPLEMENTS[i] for i in seq])
+    return ''.join([config.BASE_PAIR_COMPLEMENTS.get(i, 'N') for i in seq])
 
 def _translate(seq):
     seq = seq.upper()

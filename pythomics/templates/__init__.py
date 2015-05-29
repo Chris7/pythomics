@@ -100,7 +100,7 @@ class CustomParser(argparse.ArgumentParser):
         self.add_argument('--no-snps', help="Don't use SNPs (default to true).", action='store_false')
         self.add_argument('--dels', help="Use Deletions.", action='store_true')
         self.add_argument('--ins', help="Use Insertions.", action='store_true')
-        self.add_argument('--individual', help="The Individual to use.", type=int, default=1)
+        self.add_argument('--individual', help="The Individual to use.", type=str, default=None)
         self.add_argument('--append-chromosome', help="Should 'chr' be appended to the chromosome column?.", action='store_true')
 
     def add_bam(self, help="The SAM/BAM file to use"):

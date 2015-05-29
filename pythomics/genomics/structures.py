@@ -1,8 +1,11 @@
 __author__ = 'Chris Mitchell'
 
 import sys
+import re
 from collections import OrderedDict
 from pythomics.genomics import config
+
+GENOTYPE_SPLIT = re.compile(r'[\|/]')
 
 class VCFFile(object):
     def __init__(self, filename):
@@ -215,7 +218,7 @@ class VCFEntry(object):
         # These are all indexed by the samples index so we can do out of order
         # indexing without having to build empty lists
         self.phase = {}
-        self.genotype = {}
+        self.genotype = OrderedDict()
         self.genome_quality = {}
         self.depth = {}
         self.individuals = individuals
@@ -268,25 +271,31 @@ class VCFEntry(object):
                     extra[format_] = [d[individual]]
         return extra
 
-    def is_homozygous(self, sample = None):
+    def is_homozygous(self, individual=None):
         """This will give a boolean list corresponding to whether each individual
         is homozygous for the alternative allele.
 
         """
-        if sample:
-            pass
+        if individual is not None:
+            if isinstance(individual, str):
+                individual = self.individuals[individual]
+            alts = self.genotype[individual]
+            return [sum(alts) == len(alts)] if sum(alts) > 0 else [False]
         else:
-            return [self.alt[i-1] == self.alt[j-1] if i > 0 and j > 0 else False for i,j in self.genotype]
+            return [sum(alts) == len(alts) if sum(alts) > 0 else False for i, alts in self.genotype.iteritems()]
 
-    def is_heterozygous(self, sample = None):
+    def is_heterozygous(self, individual=None):
         """This will give a boolean list corresponding to whether each individual
         is heterozygous for the alternative allele.
 
         """
-        if sample:
-            pass
+        if individual is not None:
+            if isinstance(individual, str):
+                individual = self.individuals[individual]
+            alts = self.genotype[individual]
+            return [sum(alts) != len(alts)] if sum(alts) > 0 else [False]
         else:
-            return [True if ((i == 0 and j > 0) or (i > 0 and j == 0)) else False for i,j in self.genotype]
+            return [sum(alts) != len(alts) if sum(alts) > 0 else False for i, alts in self.genotype.iteritems()]
 
 
     def get_alt(self, individual=0, nucleotides_only=True):
@@ -391,7 +400,7 @@ class VCFEntry(object):
         for info_n, sample_info in enumerate(sample.split(':')):
             if info_n == self.GT:
                 if len(sample_info) == 3 and ('|' in sample_info or '/' in sample_info):
-                    self.genotype[individual] = sample_info
+                    self.genotype[individual] = [int(i) for i in GENOTYPE_SPLIT.split(sample_info)]
             elif info_n == self.GQ:
                 if not sample_info:
                     self.genome_quality[individual] = None

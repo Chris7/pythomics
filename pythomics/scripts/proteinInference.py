@@ -306,23 +306,23 @@ def main():
                                         motif_sequence = motif_sequence[:motif_pos+cut]
                                     motifs_found[mod_key] = motif_sequence
                                 mod_site_addition.append(mod_key)
-                                if mod_col:
+                                if mod_col or mod_site:
                                     try:
                                         mod_values = mod_grouping[protein][mod_key]['values']
                                         mod_peptides = mod_grouping[protein][mod_key]['peptides']
-                                        mod_values.append(d['mod_col'])
+                                        if mod_col:
+                                            mod_values.append(d['mod_col'])
                                         mod_grouping[protein][mod_key]['values'] = make_unique(mod_values)
                                         mod_grouping[protein][mod_key]['peptides'] = make_unique(mod_peptides+[peptide])
                                     except KeyError:
                                         try:
-                                            mod_grouping[protein][mod_key] = {'values': make_unique([d['mod_col']]), 'peptides': make_unique([peptide])}
+                                            mod_grouping[protein][mod_key] = {'values': make_unique([d['mod_col']]) if mod_col else '', 'peptides': make_unique([peptide])}
                                         except KeyError:
-                                            mod_grouping[protein] = {mod_key: {'values': make_unique([d['mod_col']]), 'peptides': make_unique([peptide])}}
+                                            mod_grouping[protein] = {mod_key: {'values': make_unique([d['mod_col']]) if mod_col else '', 'peptides': make_unique([peptide])}}
                         mod_site_additions.append('%s(%s)'%(protein,','.join(mod_site_addition)))
                     peptide_dict['inference']['mod_sites'] = ';'.join(mod_site_additions)
                     peptide_dict['inference']['motifs'] = motifs_found
-                if out_position:
-                    peptide_dict['inference']['matched_positions'] = ','.join(str(i) for i in start_positions)
+                peptide_dict['inference']['matched_positions'] = ','.join(str(i) for i in start_positions)
         if ibaq:
             ibaqs = []
             intensities = [sum(d['intensities'][i]) for i in d['intensities']]
@@ -353,9 +353,11 @@ def main():
             peptide_dict['inference']['iBAQ'] = ibaq_col_func([int(IBAQ_NORMALIZATION*i) for i in ibaqs]) if ibaqs else 0
             entry.append(peptide_dict['inference']['iBAQ'] if not unique or mapped_info['unique'] else '')
         if out_position:
-            entry.append(peptide_dict['inference']['matched_position'] if not unique or mapped_info['unique'] else '')
+            entry.append(peptide_dict['inference'].get('matched_positions', '') if not unique or mapped_info['unique'] else '')
         if mod_site:
-            entry.append(peptide_dict['inference']['mod_sites'] if not unique or mapped_info['unique'] else '')
+            entry.append(peptide_dict['inference'].get('mod_sites', '') if not unique or mapped_info['unique'] else '')
+        if motif_search:
+            entry.append(';'.join(['{}({})'.format(i,v) for i,v in peptide_dict['inference'].get('motifs',{}).iteritems()]))
         peptide_out.append(entry)
     progress_finish()
     with args.peptide_out as o:
@@ -371,6 +373,8 @@ def main():
             header.append('Peptide %s Position'%inferred_name)
         if mod_site:
             header.append('Modification Positions')
+        if motif_search:
+            header.append('Motif')
         writer.writerow(header)
         for i in peptide_out:
             writer.writerow(i)
@@ -468,7 +472,7 @@ def main():
                         if inference:
                             entry.append(d['inference']['proteins'] if not unique or mapped_peptides.get(peptide, {}).get('unique') else '')
                         if out_position:
-                            entry.append(d['inference']['matched_position'] if not unique or mapped_peptides.get(peptide, {}).get('unique') else '')
+                            entry.append(d['inference']['matched_positions'] if not unique or mapped_peptides.get(peptide, {}).get('unique') else '')
                         if mod_site:
                             mod_proteins = d['inference']['mod_sites']
                             peptide_mods = {}

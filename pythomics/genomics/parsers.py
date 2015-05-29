@@ -60,11 +60,13 @@ class VCFIterator(templates.GenericIterator, VCFMixin):
         if self.inum%100000 == 0:
             sys.stderr.write('Processed %d VCF entries\n' % self.inum)
         vcf_entry = self.vcf_file.parse_entry(row)
+        if self.sample is not None:
+            vcf_entry.parse_sample(individual=self.sample)
         return vcf_entry
     
     def next(self):
         vcf_entry = self.get_vcf_entry()
-        if self.sample:
+        if self.sample is not None:
             while vcf_entry and not vcf_entry.has_variant(self.sample):
                 vcf_entry = self.get_vcf_entry()
         return vcf_entry
@@ -268,7 +270,7 @@ class GFFReader(templates.GenericIterator):
         return self.feature_map.iteritems()
 
 class VCFReader(templates.GenericIterator, VCFMixin):
-    def __init__(self, filename, append_chromosome=False, store_positions=True):
+    def __init__(self, filename, append_chromosome=False, store_positions=True, sample=None):
         """This will read an entire VCF file and allow for querying based on attributes such
          location, individuals.
 
@@ -278,7 +280,7 @@ class VCFReader(templates.GenericIterator, VCFMixin):
         super(VCFReader, self).__init__(filename)
         self.positions = {}
         self.append_chromosome = append_chromosome
-        self.vcf_iterator = VCFIterator(filename)
+        self.vcf_iterator = VCFIterator(filename, sample=sample)
         self.vcf_file = self.vcf_iterator.vcf_file
         self.vcf_entries = []
         for vcf_entry in self.vcf_iterator:
@@ -287,8 +289,8 @@ class VCFReader(templates.GenericIterator, VCFMixin):
                 chrom = 'chr%s' % chrom
             if store_positions:
                 start = int(start)
-                furthest_end = max([abs(i) if i else None for i in vcf_entry.get_alt_lengths()])
-                if furthest_end:
+                furthest_end = max([abs(i) if i is not None else None for i in vcf_entry.get_alt_lengths()])
+                if furthest_end is not None:
                     end = start+abs(furthest_end)
                     try:
                         self.positions[chrom][(start, end)].append(vcf_entry)

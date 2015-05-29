@@ -37,19 +37,19 @@ def main():
     ins = args.ins
     homs = args.no_homozygous
     hets = args.heterozygous
-    individual = args.individual-1
+    individual = 0 if args.individual is None else args.individual
     fasta_file = fasta.FastaIterator(args.fasta)
     splice_variants = args.splice_partial
     id_tag = args.group_on
     vars_only = args.variants_only
     chosen_feature = args.feature
+    vcf = None
+    if args.vcf:
+        vcf = gp.VCFReader(args.vcf, append_chromosome=args.append_chromosome, sample=individual)
     if args.cufflinks:
         gff = gp.GFFReader(args.gff, preset='cufflinks')
     else:
         gff = gp.GFFReader(args.gff, tag_map={'ID': id_tag, 'Parent': 'Parent'})
-    vcf = None
-    if args.vcf:
-        vcf = gp.VCFReader(args.vcf, append_chromosome=args.append_chromosome)
     with args.out as o:
         for feature_name, feature in gff.feature_map.iteritems():
             header = feature_name
@@ -81,14 +81,14 @@ def main():
                         checked = False
                         valid_variant = False
                         if homs:
-                            if vcf_entry.is_homozygous()[individual]:
+                            if vcf_entry.is_homozygous(individual=individual):
                                 if ((snps and not vcf_entry.has_snp(individual=individual)) and
                                     (dels and not vcf_entry.has_deletion(individual=individual)) and
                                     (ins and not vcf_entry.has_insertion(individual=individual))):
                                         continue
                                 valid_variant = True
                         if hets:
-                            if vcf_entry.is_heterozygous()[individual]:
+                            if vcf_entry.is_heterozygous(individual=individual):
                                 if ((not valid_variant and not checked) and
                                     (snps and not vcf_entry.has_snp(individual=individual)) and
                                     (dels and not vcf_entry.has_deletion(individual=individual)) and
@@ -125,7 +125,7 @@ def main():
                                for gff_object, _ in gff_objects])
             if gff_object.strand == '-':
                 seq = fasta._reverse_complement(seq)
-            if seq and not vars_only or (vars_only and variant_info):
+            if seq and (not vars_only or (vars_only and variant_info)):
                 o.write('>%s\n%s\n' % (header, seq))
 
 if __name__ == "__main__":
