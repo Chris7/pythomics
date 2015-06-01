@@ -8,12 +8,12 @@ before_install:
   - sudo rm -rf /dev/shm
   - sudo ln -s /run/shm /dev/shm
 install:
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib nose dateutil pandas statsmodels
+  - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib nose dateutil pandas statsmodels lxml
   # Coverage packages are on my binstar channel
   - conda install --yes -c dan_blanchard python-coveralls nose-cov
   - python setup.py install
-  - sudo pip install -r requirements.txt
-  - sudo pip install coveralls coverage
+  #- sudo pip install -r requirements.txt
+  - sudo pip install coveralls coverage pysam 
 script:
   - sudo python setup.py install
   - nosetests -vv --exclude=test_script.*.py --with-coverage --cover-tests --cover-package=pythomics
