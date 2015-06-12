@@ -18,6 +18,7 @@ import pandas as pd
 import numpy as np
 import re
 from collections import OrderedDict
+from itertools import izip_longest
 from matplotlib import pyplot as plt
 from multiprocessing import Process, Queue
 try:
@@ -93,7 +94,7 @@ class Worker(Process):
         if ms1 not in self.data:
             scan = self.raw.getScan(ms1)
             scan_vals = np.array(scan.scans)
-            res = pd.Series(scan_vals[:, 1].astype(np.uint16), index=np.round(scan_vals[:, 0], self.precision), name=scan.rt, dtype='uint16')
+            res = pd.Series(scan_vals[:, 1].astype(np.uint64), index=np.round(scan_vals[:, 0], self.precision), name=scan.rt, dtype='uint64')
             # due to precision, we have multiple m/z values at the same place. We can eliminate this by grouping them and summing them.
             # Summation is the correct choice here because we are combining values of a precision higher than we care about.
             res = res.groupby(level=0).sum()
@@ -200,127 +201,123 @@ class Worker(Process):
                 rt_width = int(len(rt_index_map[rt-self.rt_width:rt+self.rt_width])/2)
                 # sys.stderr.write('{}\n'.format(rt_width))
                 base_rt = rt_index_map.index.searchsorted(rt)
+                light_df = pd.DataFrame()
+                heavy_df = pd.DataFrame()
+                light_isotopes = {}
+                heavy_isotopes = {}
+                peaks_found = {'light': OrderedDict(), 'heavy': OrderedDict()}
                 for ms_index in xrange(-3,rt_width+1):
                     df = self.getScan(rt_index_map.iloc[base_rt+ms_index])
-                    light = peaks.findEnvelope(df, start_mz=light_precursor, charge=charge, ppm=5, heavy=False)
+                    light = peaks.findEnvelope(df, start_mz=light_precursor, max_mz=heavy_precursor if quant else None, charge=charge, ppm=5, heavy=False)
                     if quant:
-                        heavy = peaks.findEnvelope(df, start_mz=heavy_precursor, charge=charge, ppm=5, heavy=True)
-                        if self.mono:
-                            for i in ['envelope', 'micro_envelopes', 'ppms']:
-                                disjoint = set(light[i].keys()).union(heavy[i].keys())-set(light[i].keys()).intersection(heavy[i].keys())
-                                for j in disjoint:
-                                    if j in light[i]:
-                                        del light[i][j]
-                                    if j in heavy[i]:
-                                        del heavy[i][j]
-                        # check for overlap of heavy/light
-                        # common_peaks = set(light['envelope'].keys()).intersection(set(heavy['envelope'].keys()))
-                        #
-                        # for common_peak in common_peaks:
-                        #     # light yields to heavy
-                        #     for i in ['envelope', 'micro_envelopes', 'ppms']:
-                        #         if common_peak in light[i]:
-                        #             del light[i][common_peak]
+                        heavy = peaks.findEnvelope(df, start_mz=heavy_precursor, charge=charge, ppm=10, heavy=True)
+                        # look for Proline/Glutamate/Glutamines
+                        # if 'P' in peptide or 'E' in peptide or 'Q' in peptide:
+                        #     heavy2 = peaks.findEnvelope(df, start_mz=heavy_precursor, isotope_offset=6, charge=charge, ppm=10, heavy=True)
+                        #     print rt_index_map.iloc[base_rt+ms_index], heavy_precursor
+                        #     print heavy
+                        #     print heavy2
                     if not light['envelope'] and (quant and not heavy['envelope']):
                         if ms_index < 0:
                             continue
-                        if light_data is None and heavy_data is None:
+                        if not peaks_found['light'] and peaks_found['heavy']:
                             return
                         # sys.stderr.write('break on {}\n'.format(ms_index))
                         break
-                    ms_rt = rt_index_map.index[base_rt+ms_index]
+                    for i in ['envelope', 'micro_envelopes', 'ppms']:
+                        for isotope, vals in light.get(i, {}).iteritems():
+                            val_dict = {'info': vals, 'df': df}
+                            try:
+                                peaks_found['light'][isotope][i].append(val_dict)
+                            except KeyError:
+                                try:
+                                    peaks_found['light'][isotope][i] = [val_dict]
+                                except KeyError:
+                                    try:
+                                        peaks_found['light'][isotope] = {i: [val_dict] }
+                                    except KeyError:
+                                        peaks_found['light'] = {isotope: {i: [val_dict]}}
+                        for isotope, vals in heavy.get(i, {}).iteritems():
+                            val_dict = {'info': vals, 'df': df}
+                            try:
+                                peaks_found['heavy'][isotope][i].append(val_dict)
+                            except KeyError:
+                                try:
+                                    peaks_found['heavy'][isotope][i] = [val_dict]
+                                except KeyError:
+                                    try:
+                                        peaks_found['heavy'][isotope] = {i: [val_dict] }
+                                    except KeyError:
+                                        peaks_found['heavy'] = {isotope: {i: [val_dict]}}
+                zip_func = zip if self.mono else izip_longest
+                light_keys = peaks_found.get('light', {}).keys()
+                heavy_keys = peaks_found.get('heavy', {}).keys()
+                if self.mono:
+                    light_keys = sorted(list(set(light_keys).intersection(heavy_keys)))
+                    heavy_keys = light_keys
+                light_clusters, heavy_clusters = len(light_keys), len(heavy_keys)
+                for light_isotope, heavy_isotope in zip_func(light_keys, heavy_keys):
+                    light_info = peaks_found.get('light', {}).get(light_isotope, {})
+                    heavy_info = peaks_found.get('heavy', {}).get(heavy_isotope, {})
+                    for light_envelope, light_micro, heavy_envelope, heavy_micro in izip_longest(
+                            light_info.get('envelope', []),
+                            light_info.get('micro_envelopes', []),
+                            heavy_info.get('envelope', []),
+                            heavy_info.get('micro_envelopes', [])):
+                        if light_envelope:
+                            iso_light_df = light_envelope['df']
+                            light_rt = iso_light_df.name
+                        if heavy_envelope:
+                            iso_heavy_df = heavy_envelope['df'] if heavy_envelope else None
+                            heavy_rt = iso_heavy_df.name
 
-                    light_query = [(df.index[i[0]],df.index[i[1]]) for i in light['micro_envelopes'].values()]
-                    start_mzs, end_mzs = zip(*light_query) if light_query else [],[]
-                    light_clusters = len(start_mzs)
+                        if light_micro and light_micro.get('info'):
+                            start, end = light_micro['info'][0], light_micro['info'][1]
+                            selector = iso_light_df.index[range(start,end+1)]
+                            temp_series = pd.Series(iso_light_df[selector], index=selector)
+                            try:
+                                series_index = light_isotopes[light_isotope]
+                            except KeyError:
+                                series_index = temp_series.idxmax()
+                                light_isotopes[light_isotope] = series_index
+                            # temp_int = temp_series.sum()#integrate.simps(temp_series.values, temp_series.index.values)
+                            temp_int = integrate.simps(temp_series.values)#, temp_series.index.values)
+                            if series_index in light_df.index:
+                                if light_rt in light_df and not pd.isnull(light_df.loc[series_index, light_rt]):
+                                    light_df.loc[series_index, light_rt] += temp_int
+                                else:
+                                    light_df.loc[series_index, light_rt] = temp_int
+                            else:
+                                light_df = light_df.append(pd.DataFrame(temp_int, columns=[light_rt], index=[series_index]))
 
-                    if quant:
-                        heavy_query = [(df.index[i[0]], df.index[i[1]]) for i in heavy['micro_envelopes'].values()]
-                        heavy_start_mzs, heavy_end_mzs = zip(*heavy_query) if heavy_query else [],[]
-                        heavy_clusters = len(heavy_start_mzs)
+                        if heavy_micro and heavy_micro.get('info', ()):
+                            start, end = heavy_micro['info'][0], heavy_micro['info'][1]
+                            selector = iso_heavy_df.index[range(start, end+1)]
+                            temp_series = pd.Series(iso_heavy_df[selector], index=selector)
+                            try:
+                                series_index = heavy_isotopes[heavy_isotope]
+                            except KeyError:
+                                series_index = temp_series.idxmax()
+                                heavy_isotopes[heavy_isotope] = series_index
+                            # temp_int = temp_series.sum()#integrate.simps(temp_series.values, temp_series.index.values)
+                            temp_int = integrate.simps(temp_series.values)#, temp_series.index.values)
+                            if series_index in heavy_df.index:
+                                if heavy_rt in heavy_df and not pd.isnull(heavy_df.loc[series_index, heavy_rt]):
+                                    heavy_df.loc[series_index, heavy_rt] += temp_int
+                                else:
+                                    heavy_df.loc[series_index, heavy_rt] = temp_int
+                            else:
+                                heavy_df = heavy_df.append(pd.DataFrame(temp_int, columns=[heavy_rt], index=[series_index]))
 
-                    # PLOTTING FOR DEBUG
-
+                if self.debug or self.html:
                     if self.debug:
-                        if self.debug:
-                            pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
-                            plt.figure()
-
-                        light_x = []
-                        light_y = []
-                        smz = 0
-                        for i,j in zip(light['micro_envelopes'].values(), light['envelope'].values()):
-                            if smz == 0:
-                                smz = i[0]
-                            val_ind = df.index[j]
-                            light_x.append(val_ind)
-                            light_y.append(0)
-                            light_x.append(val_ind)
-                            light_y.append(sum(df.iloc[k] for k in xrange(i[0], i[1]+1)))
-                            light_x.append(val_ind)
-                            light_y.append(0)
-
-                        if quant:
-                            heavy_x = []
-                            heavy_y = []
-                            for i,j in zip(heavy['micro_envelopes'].values(), heavy['envelope'].values()):
-                                val_ind = df.index[j]
-                                heavy_x.append(val_ind)
-                                heavy_y.append(0)
-                                heavy_x.append(val_ind)
-                                heavy_y.append(sum(df.iloc[k] for k in xrange(i[0], i[1]+1)))
-                                heavy_x.append(val_ind)
-                                heavy_y.append(0)
-                        ax = df.iloc[smz:j].to_dense().plot()
-                        fig = ax.get_figure()
-                        if self.debug:
-                            pdf.savefig(figure=fig)
-                        fig.clf()
-
+                        pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
                         plt.figure()
-                        ax = plt.plot(light_x, light_y, color='b')
-                        if quant:
-                            ax = plt.plot(heavy_x, heavy_y, color='r')
-                        fig = ax[0].get_figure()
-                        if self.debug:
-                            pdf.savefig(figure=fig)
-                        if self.html:
-                            fname = '{2}_{0}_{1}_{3}_{4}_clusters.png'.format(peptide, ms1, self.filename, scanId, ms_index)
-                            fig.savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
-                        fig.clf()
-
-                    if self.debug:
-                        joined_query = light_query+heavy_query if quant else light_query
-                        sys.stderr.write('{}\n'.format(joined_query))
-
-                    if light_query:
-                        light_block = pd.concat([df[start:end] for start, end in light_query])
-                        light_rt_data = light_rt_data.append(pd.Series(light_block.sum(), index=[ms_rt]))
-                        light_data = pd.concat([light_data, light_block], axis=1).sum(axis=1) if light_data is not None else light_block
-
-                    if quant:
-                        if heavy_query:
-                            heavy_block = pd.concat([df[start:end] for start, end in heavy_query])
-                            heavy_rt_data = heavy_rt_data.append(pd.Series(heavy_block.sum(), index=[ms_rt]))
-                            heavy_data = pd.concat([heavy_data, heavy_block], axis=1).sum(axis=1) if heavy_data is not None else heavy_block
-
-                #light_int = light_data.sum()
-                # We do not want to fit using a gaussian. This is because a lot of data is generated on peptides that
-                # elute quickly, and the accuracy is terrible for these peptides on positive control data-sets (you cannot
-                # fit on 2 data points) and when using the entire area under the curve via simpsons, our answers are
-                # more in line with our positive control data (known mixtures of labels)
-                # amp = light_rt_data.max()
-                # params = np.array([rt, 0.1])
-                #
-                # opt = optimize.minimize(self.gfit, params, args=(light_rt_data.index.values, light_rt_data.values, amp, rt), method='Nelder-Mead',
-                #                         options={'xtol': 1e-8})
-                # mu = opt.x[0]
-                # opt_std = abs(opt.x[1])
-                # opt_offset = 0
-                # fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
-                light_int = light_rt_data.sum()#integrate.simps(light_rt_data.values, light_rt_data.index.values)
-                if light_int < 0:
-                    import pdb; pdb.set_trace();
+                light_rt_data = light_df.fillna(0).sum(axis=0).sort_index()
+                light_int = integrate.trapz(light_rt_data.values, light_rt_data.index.values) if not light_rt_data.empty else 0#light_df.fillna(0).sum(axis=1).sum()
+                # if light_int < 0:
+                #     1
+                # light_int = light_df.fillna(0).sum(axis=1).sum()
                 # light_rt_data.plot(color='b', title=str('abc')).get_figure().savefig('/home/chris/test.png', format='png', dpi=50)
                 if self.debug or self.html:
                     plt.figure()
@@ -338,20 +335,10 @@ class Worker(Process):
                             html_images['light_rt'] = os.path.join(self.html['rel'], fname)
                         ax.get_figure().clf()
 
-                if quant:
-                    #heavy_int = heavy_data.sum()
-                    # amp = heavy_rt_data.max()
-                    # params = np.array([rt, 0.1])
-                    #
-                    # opt = optimize.minimize(self.gfit, params, args=(heavy_rt_data.index.values, heavy_rt_data.values, amp, rt), method='Nelder-Mead',
-                    #                         options={'xtol': 1e-8})
-                    # mu = opt.x[0]
-                    # opt_std = abs(opt.x[1])
-                    # opt_offset = 0
-                    # fit = lambda t : (amp-opt_offset)*np.exp(-(t-mu)**2/(2*opt_std**2))
-                    heavy_int = heavy_rt_data.sum()#integrate.simps(heavy_rt_data.values, heavy_rt_data.index.values)
-                    if heavy_int < 0:
-                        import pdb; pdb.set_trace();
+                if not heavy_df.empty:
+                    heavy_rt_data = heavy_df.fillna(0).sum(axis=0).sort_index()
+                    heavy_int = integrate.trapz(heavy_rt_data.values, heavy_rt_data.index.values) if not heavy_rt_data.empty else 0##integrate.simps(heavy_rt_data.values, heavy_rt_data.index.values)
+                    # heavy_int = heavy_df.fillna(0).sum(axis=1).sum()
                     light_rats = []#[df.iloc[v]/df.iloc[light['envelope'][i]] for i,v in enumerate(light['envelope'][1:])]
                     heavy_rats = []#[df.iloc[v]/df.iloc[heavy['envelope'][i]] for i,v in enumerate(heavy['envelope'][1:])]
                     cluster_rat = sum([(i-v) for i, v in zip(light_rats, heavy_rats[:-1])])
@@ -374,18 +361,24 @@ class Worker(Process):
 
                 if self.html:
                     fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
-                    if heavy_data is not None and light_data is not None:
-                        ax = pd.concat([light_data, heavy_data], axis=1).sum(axis=1).plot(color='b', xlim=(light_data.index.min()-1, heavy_data.index.max()+1))
-                    elif light_data is not None:
-                        ax = pd.concat([light_data], axis=1).sum(axis=1).plot(color='b', xlim=(light_data.index.min()-1, light_data.index.max()+1))
-                    elif heavy_data is not None:
-                        ax = pd.concat([heavy_data], axis=1).sum(axis=1).plot(color='b', xlim=(heavy_data.index.min()-1, heavy_data.index.max()+1))
-                    elif heavy_data is None and light_data is None:
-                        return
-                    ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
+                    x, y = [],[]
+                    cseries = light_df.fillna(0).sum(axis=1)
+                    for index, val in zip(cseries.index, cseries):
+                        x += [index,index,index]
+                        y += [0,val,0]
+                    ax = plt.plot(x,y, 'b')
+                    x, y = [],[]
+                    cseries = heavy_df.fillna(0).sum(axis=1)
+                    for index, val in zip(cseries.index, cseries):
+                        x += [index,index,index]
+                        y += [0,val,0]
+                    ax = plt.plot(x,y, 'r')
+                    ax[0].get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
                     html_images['clusters'] = os.path.join(self.html['rel'], fname)
                 if self.debug:
                     pdf.close()
+
+                quant = not heavy_df.empty
 
                 self.results.put({'peptide': scan_info.get('mod_peptide', peptide), 'heavy': heavy_int if quant else 'NA', 'light': light_int,
                                   'scan': scanId, 'light_clusters': light_clusters,
