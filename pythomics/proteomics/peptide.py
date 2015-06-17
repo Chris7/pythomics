@@ -42,3 +42,6 @@ class Peptide(object):
             pass
         else:
             return sum([config.RESIDUE_MASSES[i][0] for i in self.sequence.upper()])
+
+    def getMSMass(self, charge=0):
+        return (self.getMass()+(charge-1)*config.HYDROGEN)/float(charge)

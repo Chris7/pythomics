@@ -1,3 +1,6 @@
+HYDROGEN = 1.007825
+NEUTRON = 1.008701
+
 #We use X!Tandem notation for enzymatic digestion:
 #http://thegpm.org/TANDEM/api/pcs.html
 ENZYMES = {'trypsin': '[KR]|{P}', 'lysc': '[K]|[X]', 'none': '|',

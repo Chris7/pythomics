@@ -91,3 +91,19 @@ class PeptideObject(ScanObject):
 
     def getModifications(self):
         return '|'.join([','.join(i) for i in self.mods])
+
+    @property
+    def modifiedPeptide(self):
+        peptide = list(self.peptide)
+        for i in self.mods:
+            aa, pos = i[0], int(i[1])
+            assert peptide[pos] is aa, 'Amino acid is not equal to modification amino acid'
+            peptide[pos] = aa.lower()
+        return ''.join(peptide)
+
+    @property
+    def modifiedMass(self):
+        mass = self.mass
+        for i in self.mods:
+            mass += float(i[3])
+        return mass

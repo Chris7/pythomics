@@ -1068,7 +1068,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.master_scans = {}
 
     def getSILACLabels(self):
-        masses = {}
+        labels = {}
         if self.version == 1:
             sql = "select pnp.ParameterValue from processingnodeparameters pnp where pnp.ValueDisplayString like 'Label%' and pnp.ParameterValue like '%#%'"
             entries = self.conn.execute(sql).fetchall()
@@ -1078,15 +1078,25 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                 mod_mass = self.modTable[mod][1]
                 for aa_id in entry:
                     aa = self.aaTable[int(aa_id)]
-                    masses[aa] = mod_mass
+                    try:
+                        masses[mod_mass].add(aa)
+                    except KeyError:
+                        masses[mod_mass] = set([aa])
         elif self.version == 2:
             import HTMLParser
             html_parser = HTMLParser.HTMLParser()
             silac = etree.fromstring([i for i in self.root.iterdescendants('QuantitationMethod')][0].text.encode('utf-16'))
-            for mod_info in [etree.fromstring(html_parser.unescape(i.text)) for i in silac.iterdescendants('Parameter') if 'Modification Version' in i.text]:
-                for aa in mod_info.get('AminoAcids').split(','):
-                    masses[aa] = float(mod_info.get('DeltaMass'))
-        return masses
+            for method in silac.findall('*MethodPart'):
+                method_label = method.attrib['name']
+                masses = {}
+                labels[method_label] = masses
+                for mod_info in [etree.fromstring(html_parser.unescape(i.text)) for i in method.iter('Parameter') if 'Modification Version' in i.text]:
+                    for aa in mod_info.get('AminoAcids').split(','):
+                        try:
+                            masses[float(mod_info.get('DeltaMass'))].add(aa)
+                        except KeyError:
+                            masses[float(mod_info.get('DeltaMass'))] = set([aa])
+        return labels
 
     def loadChromatogram(self):
         sql = 'select * from chromatograms'
