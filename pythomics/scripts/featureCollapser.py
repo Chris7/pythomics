@@ -20,11 +20,13 @@ import pythomics.parsers.fasta as fasta
 from pythomics.utils import ColumnFunctions
 
 parser = CustomParser(description = description)
-parser.add_delimited_file()
+parser.add_delimited_file(cols=['--group-on'])
 parser.add_out()
 parser.add_argument('--substring', help='If set, merge features by partial matches (such as collapsing peptides into larger peptides)', action='store_true')
-parser.add_column_function('--mod-col', col_help="The function to apply to grouped entries in modification columns.")
+parser.add_column_function('--summary-col', col_help="The function to apply to grouped entries in modification columns.")
+parser.add_argument('--summary-col-delimiter', help="If the summary column has a delimiter, such as a ; for multiple proteins.")
 parser.add_argument('--strict', help='For numeric operations, fail if types are incorrect (converting NA to a float for instance).', action='store_true')
+parser.add_argument('--merge', help='Merge together identical entries.', action='store_true')
 # parser.add_argument('--merge-columns', help="If set, columns of merged peptides will be combined.", action='store_true')
 # parser.add_argument('--merge-delimiter', help='The delimiter for column merges.', type=str, default=';')
 parser.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true')
@@ -33,28 +35,30 @@ def main():
     args = parser.parse_args()
     peptide_colname = False
     try:
-        peptide_column = int(args.col)
+        peptide_column = int(args.group_on)
         peptide_column = peptide_column-1 if peptide_column > 0 else peptide_column
     except ValueError:
         peptide_colname = True
-        peptide_column = args.col
+        peptide_column = args.group_on
     tsv_file = args.tsv
     header_lines = args.header
     delimiters = ''.join(list(set([',','\t',args.delimiter])))
     peptide_join = args.substring
     col_func = ColumnFunctions(args)
     try:
-        mod_col = int(args.mod_col)-1 if args.mod_col else False
+        mod_col = int(args.summary_col)-1 if args.summary_col else False
     except ValueError:
         mod_col = None
-    mod_col_func = getattr(col_func, args.mod_col_func, col_func.concat)
+    mod_col_func = getattr(col_func, args.summary_col_func, col_func.concat)
+    summary_col_delim = args.summary_col_delimiter
+    merge = args.merge
     # col_delimiter = args.merge_delimiter
     # merge_columns = args.merge_columns
     case_sens = args.case_sensitive
     peptide_history = {}
     headers = []
     with tsv_file as f:
-        dialect = csv.Sniffer().sniff(f.read(1024), delimiters=delimiters)
+        dialect = csv.Sniffer().sniff(f.read(1024*16), delimiters=delimiters)
         f.seek(0)
         reader = csv.reader(f, dialect)
         for line_num, entry in enumerate(reader):
@@ -67,7 +71,7 @@ def main():
                             break
                 if mod_col is None:
                     for i, v in enumerate(entry):
-                        if v.lower() == args.mod_col.lower():
+                        if v.lower() == args.summary_col.lower():
                             mod_col = i
                             break
             else:
@@ -124,7 +128,17 @@ def main():
                             entry.append([v])
                         else:
                             entry[i].append(v)
-                entry_string = [mod_col_func(v) if i == mod_col else v[0] for i, v in enumerate(entry)]
+
+                entry_string = []
+                for i, v in enumerate(entry):
+                    if i == mod_col:
+                        if summary_col_delim:
+                            l = [j for i in v for j in i.split(summary_col_delim)]
+                        else:
+                            l = v
+                        entry_string.append(mod_col_func(set(l) if merge else l))
+                    else:
+                        entry_string.append(v[0])
             else:
                 entry_string = entries[0]
 
