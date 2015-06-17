@@ -8,7 +8,11 @@ corresponding proteins present in an annotation file, and can also
 use this annotation to include iBAQ measures.
 """
 
-import argparse, sys, re, csv, copy, decimal, itertools, os
+import argparse, sys, csv, copy, decimal, itertools, os, operator
+try:
+    import re2 as re
+except ImportError:
+    import re
 from multiprocessing import Pool, Value
 from collections import Counter
 from pythomics.templates import CustomParser
@@ -54,6 +58,8 @@ global protein_sequences
 global protein_sequences_converted
 global fasta_headers
 global il_convert
+global maps_done
+maps_done=0
 cache = {}
 proteins = []
 fasta_headers = []
@@ -61,7 +67,6 @@ protein_sequences = ''
 IBAQ_NORMALIZATION = decimal.Decimal(1e6)
 # the number of peptides we map per core
 peptides_per_core = 100
-maps_done = 0
 
 def progress_update(a, b):
     sys.stderr.write('\r{0:2.2f}% Completed'.format(a/b*100))
@@ -77,21 +82,27 @@ def make_unique(l):
     return [x for x in l if x not in seen and not seen.add(x)]
     #return list(OrderedDict.fromkeys(l))
 
+# from profilestats import profile
+
+# @profile(print_stats=10, dump_stats=True)
 def mapper(peptides):
-    peptidestring = '(%s)'%'|'.join([i.upper().replace('I', '!').replace('L', '!').replace('!', '[IL]') if il_convert else i.upper() for i in peptides])
-    matches = [(i.group(1), i.start()) for i in re.finditer(peptidestring, protein_sequences)]
-    matches.sort(key=lambda x: x[0])
-    groups = itertools.groupby(matches, key=lambda x: x[0])
+    pep_format = r'(.+?)\t[^\n]+?({})'
+    matches = [{'peptide': i.group(2), 'peptide_start': i.start(2), 'accession': i.group(1)}
+               for j in peptides
+               for i in re.finditer(pep_format.format(j.upper().replace('L', '!').replace('!', '[IL]')), protein_sequences)]
+    matches.sort(key=lambda x: x['peptide_start'])
+    groups = itertools.groupby(matches, key=lambda x: x['peptide'])
     matched = {}
     for peptide, peptide_grouped in groups:
         pg = list(peptide_grouped)
-        indices = [(protein_sequences.count('\n', 0, match), match-protein_sequences[:match].rfind('\n')) for peptide, match in pg]
-        found_proteins = make_unique([fasta_headers[i[0]] for i in indices])
+        pg.sort(key=lambda x: x['peptide_start'])
+        accessions = [group['accession'] for group in pg]
+        found_proteins = make_unique(accessions)
         matched[peptide] = {
             'proteins': found_proteins,
-            'positions': [i[1] for i in indices],
-            'indices': [i[0] for i in indices],
-            'matches': [match for peptide, match in pg],
+            'positions': [group['peptide_start']-protein_sequences[:group['peptide_start']].rfind('\t') for group in pg],
+            'matches': [group['peptide_start'] for group in pg],
+            'accessions': accessions,
             'unique': True,
         }
     # handle the unmatched ones
@@ -99,8 +110,8 @@ def mapper(peptides):
         matched[peptide] = {
             'proteins': [],
             'positions': [],
-            'indices': [],
             'matches': [],
+            'accessions': accessions,
             'unique': True
         }
     return matched
@@ -143,6 +154,7 @@ def main():
         enzyme = digest.Enzyme(enzyme=args.enzyme[0] if isinstance(args.enzyme, list) else args.enzyme)
     sys.stderr.write("Reading in Fasta file.\n")
     fasta_headers, protein_sequences = zip(*[(header.replace(';', ''), sequence) for header, sequence in fasta_file])
+
     #replace headers with parsed ones
     if args.regex:
         regex = re.compile(args.regex)
@@ -151,9 +163,10 @@ def main():
         fasta_headers = [' '.join(i.groups()) for i in fasta_headers if i]
         sys.stderr.write('{0} header sequences did not match regex {1} and have been discarded.\n'.format(len(fasta_headers)-len(protein_sequences), args.regex))
     if ibaq:
-        ibaq_protein_sequence = copy.deepcopy(protein_sequences)
+        ibaq_protein_sequence = {header: sequence for header, sequence in zip(fasta_headers, protein_sequences)}
         cleaved = {}
-    protein_sequences = '\n'.join(protein_sequences)
+    protein_sequences = '\n'.join(['{}\t{}'.format(header, sequence) for header, sequence in zip(fasta_headers, protein_sequences)])
+    # protein_sequences = '\n'.join(protein_sequences)
     peptide_history = {}
     mod_grouping = {} # ordered by protein, site, type
     pep_count = 0
@@ -203,12 +216,15 @@ def main():
                 pep_set.add(peptide)
                 if peptide not in peptide_history:
                     peptide_history[peptide] = {
-                        'intensities': dict([(i, set([])) for i in xrange(len(precursor_columns))]),
+                        'intensities': dict([(i, set([])) for i in xrange(len(precursor_columns))]) if precursor_columns is not None else {},
                     }
                 if precursor_columns:
                     for n_i, e_i in enumerate(precursor_columns):
                         if entry[e_i]:
-                            intensity = decimal.Decimal(entry[e_i])
+                            try:
+                                intensity = decimal.Decimal(entry[e_i])
+                            except decimal.InvalidOperation:
+                                intensity = decimal.Decimal(0)
                             peptide_history[peptide]['intensities'][n_i].add(intensity)
                 if mod_col is not None:
                     peptide_history[peptide]['mod_col'] = entry[mod_col]
@@ -223,20 +239,18 @@ def main():
     pool = Pool(cores)
     # get our matches
 
-    peptides = peptide_history.keys()
+    peptides = list(set([i.upper() for i in peptide_history.keys()]))
     # break into groups of 100 (empirically gives fastest mapping)
     subpeptides = [peptides[n:n+peptides_per_core] for n in xrange(0, len(peptides), peptides_per_core)]
+    if n < len(peptides):
+        subpeptides.extend(peptides[n+peptides_per_core:])
     num_peps = len(peptides)
 
-    def pool_monitor(res):
-        global maps_done
-        maps_done += len(res[0])
-        progress_update(maps_done, num_peps)
     progress_finish()
 
-
     sys.stderr.write('Mapping Peptides.\n')
-    results = pool.map_async(mapper, subpeptides, callback=pool_monitor)
+    results = pool.map_async(mapper, subpeptides)
+    results.wait()
     mapped_peptides = dict((k, v) for d in results.get() for (k, v) in d.items())
     sys.stderr.write('\nPeptides mapped.\n')
 
@@ -246,7 +260,7 @@ def main():
     stats['peptides_found'] = len(pep_set)
     proteins_mapped = set([])
     peptide_out = []
-    empty_dict = {'proteins': '', 'positions': [], 'indices': [], 'matches': [], 'unique': True}
+    empty_dict = {'proteins': '', 'positions': [], 'accessions': [], 'matches': [], 'unique': True}
     for index, (peptide, d) in enumerate(peptide_history.iteritems()):
         try:
             peptide_dict = peptide_grouping[peptide]
@@ -262,8 +276,7 @@ def main():
             peptide_dict['inference'] = {'proteins': ''}
             if inference:
                 proteins = mapped_info['proteins']
-                if mod_site:
-                    start_positions = mapped_info['positions']
+                start_positions = mapped_info['positions'] if mod_site else []
                 proteins_mapped|=set(proteins)
                 if unique:
                     proteins = make_unique(proteins)
@@ -294,17 +307,19 @@ def main():
                                 mod_pos = start_position+j
                                 mod_key = '%s:%d'%(k, mod_pos)
                                 if find_motif:
-                                    motif_sequence = protein_sequences[mapped_info['matches'][0]+j-motif_window:mapped_info['matches'][0]+j+motif_window+1]
+                                    motif_sequences = [protein_sequences[i+j-motif_window:i+j+motif_window+1] for i in mapped_info['matches']]
                                     motif_pos = motif_window
                                     # remove any newlines to the left of us
-                                    cut = motif_sequence[:motif_pos].rfind('\n')
-                                    if cut != -1:
-                                        motif_sequence = motif_sequence[cut+1:]
-                                        motif_pos -= (cut+1)
-                                    cut = motif_sequence[motif_pos+1:].rfind('\n')
-                                    if cut != -1:
-                                        motif_sequence = motif_sequence[:motif_pos+cut]
-                                    motifs_found[mod_key] = motif_sequence
+                                    for motif_sequence in motif_sequences:
+                                        cut = motif_sequence[:motif_pos].rfind('\t')
+                                        if cut != -1:
+                                            motif_sequence = motif_sequence[cut+1:]
+                                            motif_pos -= (cut+1)
+                                        cut = motif_sequence[motif_pos+1:].rfind('\t')
+                                        if cut != -1:
+                                            motif_sequence = motif_sequence[:motif_pos+cut]
+                                        found = motifs_found.get(mod_key, [])
+                                        motifs_found[mod_key] = make_unique(found+[motif_sequence])
                                 mod_site_addition.append(mod_key)
                                 if mod_col or mod_site:
                                     try:
@@ -331,11 +346,11 @@ def main():
             except decimal.InvalidOperation:
                 precursor_int = 0
             entry.append(precursor_int)
-            for protein_index in mapped_info['indices']:
+            for protein_index in mapped_info['accessions']:
                 peptides = cleaved.get(protein_index, None)
                 if peptides is None:
                     if ibaq_redunant:
-                        peptides = sum([len(enzyme.cleave(ibaq_protein_sequence[possible_protein_index], min=digest_min, max=digest_max)) for possible_protein_index in mapped_info['indices']])
+                        peptides = sum([len(enzyme.cleave(ibaq_protein_sequence[protein_accession], min=digest_min, max=digest_max)) for protein_accession in mapped_info['accessions']])
                     else:
                         peptides = len(set([peptide for tryptic_peptides in [enzyme.cleave(ibaq_protein_sequence[possible_protein_index], min=digest_min, max=digest_max) for possible_protein_index in mapped_info['indices']]
                                             for peptide in tryptic_peptides]))
@@ -357,7 +372,7 @@ def main():
         if mod_site:
             entry.append(peptide_dict['inference'].get('mod_sites', '') if not unique or mapped_info['unique'] else '')
         if motif_search:
-            entry.append(';'.join(['{}({})'.format(i,v) for i,v in peptide_dict['inference'].get('motifs',{}).iteritems()]))
+            entry.append(';'.join(['{}({})'.format(motif_site,';'.join(motifs)) for motif_site,motifs in peptide_dict['inference'].get('motifs',{}).iteritems()]))
         peptide_out.append(entry)
     progress_finish()
     with args.peptide_out as o:
@@ -386,8 +401,8 @@ def main():
                 header.append(inferred_name)
             writer.writerow(header)
             for peptide, peptide_dict in peptide_grouping.iteritems():
-                for motif_key, motif in peptide_dict['inference'].get('motifs', {}).iteritems():
-                    writer.writerow([motif_key, motif, peptide_dict['inference']['proteins']])
+                for motif_key, motifs in peptide_dict['inference'].get('motifs', {}).iteritems():
+                    writer.writerow([motif_key, ';'.join(motifs), peptide_dict['inference']['proteins']])
     stats['proteins_mapped'] = len(proteins_mapped)
     if inference:
         with args.protein_out as o:
@@ -418,7 +433,6 @@ def main():
                                 for mod_prot_ in mod_prots:
                                     mod_prot, mod_prot_sites = mod_prot_.rsplit('(', 1)
                                     if mod_prot == protein:
-                                        # print mod_prot_sites
                                         for mod_prot_site in mod_prot_sites[:-1].split(','):
                                             if mod_prot_site:
                                                 mod_aa, mod_prot_site = mod_prot_site[:-1].split(':')
