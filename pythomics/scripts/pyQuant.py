@@ -40,13 +40,8 @@ from pythomics.templates import CustomParser
 from pythomics.proteomics.parsers import GuessIterator
 from pythomics.proteomics import peaks, config
 
-RESULT_ORDER = (('peptide', 'Peptide'), ('heavy', 'Heavy'), ('light', 'Light'), ('h_l', 'Heavy/Light'), ('modifications', 'Modifications'),
-                ('charge', 'Charge'), ('ms1', 'MS1 Spectrum ID'), ('scan', 'MS2 Spectrum ID'), ('light_precursor', 'Light Precursor M/Z'),
-                ('heavy_precursor', 'Heavy Precursor M/Z'),
-                ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'), ('light_rt_dev', 'Light Retention Time Deviation'),
-                ('heavy_rt_dev', 'Heavy Retention Time Deviation'), ('light_residuals', 'Light Intensity Residuals of Fit'),
-                ('heavy_residuals', 'Heavy Intensity Residuals of Fit'), ('cluster_ratio_deviation', 'Deviation of Heavy Clusters From Light'),
-                ('light_snr', 'Light SNR'), ('heavy_snr', 'Heavy SNR'), ('heavy_ks', 'Heavy KS'), ('light_ks', 'Light KS'))
+RESULT_ORDER = [('peptide', 'Peptide'), ('modifications', 'Modifications'),
+                ('charge', 'Charge'), ('ms1', 'MS1 Spectrum ID'), ('scan', 'MS2 Spectrum ID')]
 
 
 parser = CustomParser(description=description)
@@ -67,17 +62,16 @@ parser.add_argument('--resume', help="Will resume from the last run. Only works 
 parser.add_argument('-o', '--out', nargs='?', help='Stuff', type=str)
 
 class Worker(Process):
-    def __init__(self, queue=None, results=None, precision=6, raw_name=None, heavy_masses=None,
+    def __init__(self, queue=None, results=None, precision=6, raw_name=None, silac_labels=None,
                  temp=False, sparse=False, debug=False, html=False, mono=False):
         super(Worker, self).__init__()
         self.precision = precision
         self.sparse = sparse
         self.queue=queue
         self.results = results
-        if heavy_masses is None:
-            self.heavy_masses = {'R': 10.008269, 'K': 8.0142}
-        else:
-            self.heavy_masses = heavy_masses
+        self.silac_labels = {} if silac_labels is None else silac_labels
+        self.shifts = {0: "Light"}
+        self.shifts.update({sum(silac_masses.keys()): silac_label for silac_label, silac_masses in self.silac_labels.iteritems()})
         self.raw_name = raw_name
         self.filename = os.path.split(self.raw_name)[1]
         self.temp = temp
@@ -102,6 +96,10 @@ class Worker(Process):
                 res = res.to_sparse(fill_value=0)
             self.data[ms1] = res
         return self.data[ms1].to_dense() if dense else self.data[ms1]
+
+    @staticmethod
+    def sign(a):
+        return -1 if a < 0 else 1
 
     def cleanScans(self, rt_map, current_rt):
         min_rt = current_rt - self.rt_width
@@ -175,221 +173,190 @@ class Worker(Process):
                 precursor = scan.get('mass')+config.HYDROGEN*(charge-1)
 
                 shift = scan_info['mass_shift']
+                if shift > 0:
+                    precursor -= shift
                 peptide = scan_info['peptide']
                 mod_pep = scan_info['mod_peptide']
                 if self.debug:
                     sys.stderr.write('on ms {0} {1} {2} {3}\n'.format(ms1, rt, precursor, scan_info))
-                if shift == 0:
-                    count = 0
-                    for label_mass, label_masses in self.heavy_masses.iteritems():
-                        labels = [label_mass for mod_aa in mod_pep if mod_aa in label_masses]
-                        count += len(labels)
-                        shift += sum(labels)
-                    if count != 1:
-                        return
-                    light_precursor = precursor
-                    heavy_precursor = precursor+shift
-                else:
-                    light_precursor = precursor-shift
-                    heavy_precursor = precursor
-
-                quant = light_precursor != heavy_precursor
-
-                light_data, heavy_data = None, None
-                light_rt_data = pd.Series()
-                heavy_rt_data = pd.Series()
+                precursors = {}
+                data = OrderedDict()
+                for silac_label, silac_masses in self.silac_labels.items():
+                    silac_shift=0
+                    for label_mass, label_masses in silac_masses.items():
+                        labels = [label_mass for mod_aa in peptide if mod_aa in label_masses]
+                        # count += len(labels)
+                        silac_shift += sum(labels)
+                    precursors[silac_label] = silac_shift
+                    data[silac_label] = {'data': None, 'df': pd.DataFrame(), 'precursor': 'NA',
+                                         'isotopes': {}, 'peaks': OrderedDict(), 'intensity': 'NA'}
+                precursors = OrderedDict(sorted(precursors.items(), key=operator.itemgetter(1)))
+                shift_maxes = {i: j for i,j in zip(precursors.keys(), precursors.values()[1:])}
                 rt_width = int(len(rt_index_map[rt-self.rt_width:rt+self.rt_width])/2)
                 # sys.stderr.write('{}\n'.format(rt_width))
                 base_rt = rt_index_map.index.searchsorted(rt)
-                light_df = pd.DataFrame()
-                heavy_df = pd.DataFrame()
-                light_isotopes = {}
-                heavy_isotopes = {}
-                peaks_found = {'light': OrderedDict(), 'heavy': OrderedDict()}
-                for ms_index in xrange(-3,rt_width+1):
+                finished = set([])
+                result_dict = {'peptide': scan_info.get('mod_peptide', peptide),
+                              'scan': scanId, 'ms1': ms1,
+                              'charge': charge, 'modifications': mods}
+                rt_window = []
+                ms_index = 0
+                delta = -1
+                while True:
+                    if len(finished) == len(precursors.keys()):
+                        break
+                    rt_window.append(rt_index_map.index[base_rt+ms_index])
                     df = self.getScan(rt_index_map.iloc[base_rt+ms_index])
-                    light = peaks.findEnvelope(df, start_mz=light_precursor, max_mz=heavy_precursor if quant else None, charge=charge, ppm=5, heavy=False)
-                    if quant:
-                        heavy = peaks.findEnvelope(df, start_mz=heavy_precursor, charge=charge, ppm=10, heavy=True)
+                    found = False
+                    for precursor_label, precursor_shift in precursors.items():
+                        if precursor_label in finished:
+                            continue
+                        precursor_mass = precursor+precursor_shift
+                        data[precursor_label]['precursor'] = precursor_mass
+                        shift_max = shift_maxes.get(precursor_label)
+                        shift_max = precursor+shift_max if shift_max is not None else None
+                        envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max, charge=charge, ppm=5, heavy=precursor_shift>0 if ms_index>0 else False)
+                        peaks_found = data[precursor_label]['peaks']
                         # look for Proline/Glutamate/Glutamines
                         # if 'P' in peptide or 'E' in peptide or 'Q' in peptide:
                         #     heavy2 = peaks.findEnvelope(df, start_mz=heavy_precursor, isotope_offset=6, charge=charge, ppm=10, heavy=True)
                         #     print rt_index_map.iloc[base_rt+ms_index], heavy_precursor
                         #     print heavy
                         #     print heavy2
-                    if not light['envelope'] and (quant and not heavy['envelope']):
-                        if ms_index < 0:
+                        if not envelope['envelope']:
+                            if not peaks_found:
+                                finished.add(precursor_label)
                             continue
-                        if not peaks_found['light'] and peaks_found['heavy']:
-                            return
-                        # sys.stderr.write('break on {}\n'.format(ms_index))
-                        break
-                    for i in ['envelope', 'micro_envelopes', 'ppms']:
-                        for isotope, vals in light.get(i, {}).iteritems():
-                            val_dict = {'info': vals, 'df': df}
-                            try:
-                                peaks_found['light'][isotope][i].append(val_dict)
-                            except KeyError:
+                        found = True
+                        for i in ['envelope', 'micro_envelopes', 'ppms']:
+                            for isotope, vals in envelope.get(i, {}).iteritems():
+                                val_dict = {'info': vals, 'df': df}
                                 try:
-                                    peaks_found['light'][isotope][i] = [val_dict]
+                                    peaks_found[isotope][i].append(val_dict)
                                 except KeyError:
                                     try:
-                                        peaks_found['light'][isotope] = {i: [val_dict] }
+                                        peaks_found[isotope][i] = [val_dict]
                                     except KeyError:
-                                        peaks_found['light'] = {isotope: {i: [val_dict]}}
-                        for isotope, vals in heavy.get(i, {}).iteritems():
-                            val_dict = {'info': vals, 'df': df}
-                            try:
-                                peaks_found['heavy'][isotope][i].append(val_dict)
-                            except KeyError:
-                                try:
-                                    peaks_found['heavy'][isotope][i] = [val_dict]
-                                except KeyError:
-                                    try:
-                                        peaks_found['heavy'][isotope] = {i: [val_dict] }
-                                    except KeyError:
-                                        peaks_found['heavy'] = {isotope: {i: [val_dict]}}
-                zip_func = zip if self.mono else izip_longest
-                light_keys = peaks_found.get('light', {}).keys()
-                heavy_keys = peaks_found.get('heavy', {}).keys()
-                if self.mono:
-                    light_keys = sorted(list(set(light_keys).intersection(heavy_keys)))
-                    heavy_keys = light_keys
-                light_clusters, heavy_clusters = len(light_keys), len(heavy_keys)
-                for light_isotope, heavy_isotope in zip_func(light_keys, heavy_keys):
-                    light_info = peaks_found.get('light', {}).get(light_isotope, {})
-                    heavy_info = peaks_found.get('heavy', {}).get(heavy_isotope, {})
-                    for light_envelope, light_micro, heavy_envelope, heavy_micro in izip_longest(
-                            light_info.get('envelope', []),
-                            light_info.get('micro_envelopes', []),
-                            heavy_info.get('envelope', []),
-                            heavy_info.get('micro_envelopes', [])):
-                        if light_envelope:
-                            iso_light_df = light_envelope['df']
-                            light_rt = iso_light_df.name
-                        if heavy_envelope:
-                            iso_heavy_df = heavy_envelope['df'] if heavy_envelope else None
-                            heavy_rt = iso_heavy_df.name
+                                        peaks_found[isotope] = {i: [val_dict]}
+                    if found is False:
+                        if delta == -1:
+                            delta = 1
+                            ms_index=1
+                        elif ms_index >= 2:
+                            break
+                    ms_index += delta
+                # shared_isotopes = set([])
+                rt_window.sort()
+                # if self.mono:
+                #     for silac_label, silac_data in data.iteritems():
+                #         peaks_found = silac_data.get('peaks')
+                #         found_isotopes = set(peaks_found.keys())
+                #         if found_isotopes:
+                #             shared_isotopes = shared_isotopes.intersection(found_isotopes) if shared_isotopes else found_isotopes
+                for silac_label, silac_data in data.iteritems():
+                    peaks_found = silac_data.get('peaks')
+                    peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window)
+                    silac_data['df'] = peak_data.get('data')
 
-                        if light_micro and light_micro.get('info'):
-                            start, end = light_micro['info'][0], light_micro['info'][1]
-                            selector = iso_light_df.index[range(start,end+1)]
-                            temp_series = pd.Series(iso_light_df[selector], index=selector)
-                            try:
-                                series_index = light_isotopes[light_isotope]
-                            except KeyError:
-                                series_index = temp_series.idxmax()
-                                light_isotopes[light_isotope] = series_index
-                            # temp_int = temp_series.sum()#integrate.simps(temp_series.values, temp_series.index.values)
-                            temp_int = integrate.simps(temp_series.values)#, temp_series.index.values)
-                            if series_index in light_df.index:
-                                if light_rt in light_df and not pd.isnull(light_df.loc[series_index, light_rt]):
-                                    light_df.loc[series_index, light_rt] += temp_int
-                                else:
-                                    light_df.loc[series_index, light_rt] = temp_int
-                            else:
-                                light_df = light_df.append(pd.DataFrame(temp_int, columns=[light_rt], index=[series_index]))
-
-                        if heavy_micro and heavy_micro.get('info', ()):
-                            start, end = heavy_micro['info'][0], heavy_micro['info'][1]
-                            selector = iso_heavy_df.index[range(start, end+1)]
-                            temp_series = pd.Series(iso_heavy_df[selector], index=selector)
-                            try:
-                                series_index = heavy_isotopes[heavy_isotope]
-                            except KeyError:
-                                series_index = temp_series.idxmax()
-                                heavy_isotopes[heavy_isotope] = series_index
-                            # temp_int = temp_series.sum()#integrate.simps(temp_series.values, temp_series.index.values)
-                            temp_int = integrate.simps(temp_series.values)#, temp_series.index.values)
-                            if series_index in heavy_df.index:
-                                if heavy_rt in heavy_df and not pd.isnull(heavy_df.loc[series_index, heavy_rt]):
-                                    heavy_df.loc[series_index, heavy_rt] += temp_int
-                                else:
-                                    heavy_df.loc[series_index, heavy_rt] = temp_int
-                            else:
-                                heavy_df = heavy_df.append(pd.DataFrame(temp_int, columns=[heavy_rt], index=[series_index]))
-
-                if self.debug or self.html:
-                    if self.debug:
-                        pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
-                        plt.figure()
-                light_rt_data = light_df.fillna(0).sum(axis=0).sort_index()
-                light_int = integrate.trapz(light_rt_data.values, light_rt_data.index.values) if not light_rt_data.empty else 0#light_df.fillna(0).sum(axis=1).sum()
-                # if light_int < 0:
-                #     1
-                # light_int = light_df.fillna(0).sum(axis=1).sum()
-                # light_rt_data.plot(color='b', title=str('abc')).get_figure().savefig('/home/chris/test.png', format='png', dpi=50)
-                if self.debug or self.html:
-                    plt.figure()
-                    if not light_rt_data.empty:
-                        ax = light_rt_data.plot(color='b', title=str(light_int))
-                        # X = light_rt_data.index.values
-                        # pd.Series(dict(zip(X, fit(X)+opt_offset))).plot(color='r')
-                        # plt.plot([rt, rt], [0, (amp-opt_offset)], color='k')
-                        # plt.plot([mu, mu], [0, (amp-opt_offset)], color='r')
+                    if self.debug or self.html:
                         if self.debug:
-                            pdf.savefig(figure=ax.get_figure())
-                        if self.html:
-                            fname = '{2}_{0}_{1}_{3}_light_rt.png'.format(peptide, ms1, self.filename, scanId)
-                            ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
-                            html_images['light_rt'] = os.path.join(self.html['rel'], fname)
-                        ax.get_figure().clf()
-
-                if not heavy_df.empty:
-                    heavy_rt_data = heavy_df.fillna(0).sum(axis=0).sort_index()
-                    heavy_int = integrate.trapz(heavy_rt_data.values, heavy_rt_data.index.values) if not heavy_rt_data.empty else 0##integrate.simps(heavy_rt_data.values, heavy_rt_data.index.values)
-                    # heavy_int = heavy_df.fillna(0).sum(axis=1).sum()
-                    light_rats = []#[df.iloc[v]/df.iloc[light['envelope'][i]] for i,v in enumerate(light['envelope'][1:])]
-                    heavy_rats = []#[df.iloc[v]/df.iloc[heavy['envelope'][i]] for i,v in enumerate(heavy['envelope'][1:])]
-                    cluster_rat = sum([(i-v) for i, v in zip(light_rats, heavy_rats[:-1])])
+                            pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
+                            plt.figure()
+                    light_rt_data = peak_data.get('rt')
+                    light_int = peak_data.get('integration')
+                    silac_data['intensity'] = light_int
                     if self.debug or self.html:
                         plt.figure()
-                        if not heavy_rt_data.empty:
-                            ax = heavy_rt_data.plot(color='b', title=str(heavy_int))
-                            # X = heavy_rt_data.index.values
-                            # pd.Series(dict(zip(X, fit(X)+opt_offset))).plot(color='r')
-                            # plt.plot([rt, rt], [0, (amp-opt_offset)], color='k')
-                            # plt.plot([mu, mu], [0, (amp-opt_offset)], color='r')
+                        if not light_rt_data.empty:
+                            ax = light_rt_data.plot(color='b', title=str(light_int))
                             if self.debug:
                                 pdf.savefig(figure=ax.get_figure())
                             if self.html:
-                                fname = '{2}_{0}_{1}_{3}_heavy_rt.png'.format(peptide, ms1, self.filename, scanId)
+                                fname = '{2}_{0}_{1}_{3}_{4}_rt.png'.format(peptide, ms1, self.filename, scanId, silac_label)
                                 ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
-                                html_images['heavy_rt'] = os.path.join(self.html['rel'], fname)
-                            ax.get_figure().clf()
-                            plt.close('all')
+                                html_images['{}_rt'.format(silac_label)] = os.path.join(self.html['rel'], fname)
+                data_keys = data.keys()
+                for silac_label in data_keys:
+                    label1_keys = set(data[silac_label]['peaks'].keys())
+                    label1_data = data[silac_label]
+                    if not self.mono:
+                        #Chris_Ecoli_1-2-4_quant_ns - pearson medium 0.82, heavy, 0.93
+                        label1_int = label1_data.get('intensity')
+                        #Chris_Ecoli_1-2-4_quant_ns2 -  pearson medium 0.71, heavy 0.92
+                        #label1_int = label1_data['df'].fillna(0).sum(axis=1).sum()
+                    for silac_label2 in data_keys:
+                        if silac_label == silac_label2:
+                            continue
+                        label2_data = data[silac_label2]
+                        if self.mono:
+                            # compare the ratios of monoisotopic peaks
+                            shared_isotopes = label1_keys.intersection(set(label2_data['peaks'].keys()))
+                            if not shared_isotopes:
+                                continue
+                            # force the peak patterns to be in the same rough shape
+                            label1_diff = label1_data['df'].fillna(0).sum(axis=1).diff().fillna(0)
+                            label2_diff = label2_data['df'].fillna(0).sum(axis=1).diff().fillna(0)
+                            si2 = set([])
+                            # print label1_diff
+                            # print label2_diff
+                            # print shared_isotopes
+                            for i in sorted(list(shared_isotopes)):
+                                if self.sign(label1_diff.iloc[i]) == self.sign(label2_diff.iloc[i]):
+                                    si2.add(i)
+                                else:
+                                    break
+                            shared_isotopes = si2
+
+                            # This method is inferior
+                            # peaks_found = label1_data.get('peaks')
+                            # peak_data = peaks.buildEnvelope(peaks_found=peaks_found, isotopes=shared_isotopes,
+                            #                                 rt_window=rt_window)
+                            ##Chris_Ecoli_1-2-4_quant_wide3 pearson: medium 0.55, heavy 0.73
+                            # label1_int = peak_data.get('integration')
+                            ##Chris_Ecoli_1-2-4_quant_wide4 pearson: medium 0.72, heavy 0.96
+                            # label1_int = peak_data.get('rt').sum()
+                            ##Chris_Ecoli_1-2-4_quant_wide2 pearson: medium 0.72, heavy 0.96
+                            label1_int = label1_data['df'].fillna(0).sum(axis=1).iloc[list(shared_isotopes)].sum()
+
+                            # peaks_found = label2_data.get('peaks')
+                            # peak_data = peaks.buildEnvelope(peaks_found=peaks_found, isotopes=shared_isotopes,
+                            #                                 rt_window=rt_window)
+                            # label2_int = peak_data.get('integration')
+                            # label2_int = peak_data.get('rt').sum()
+                            label2_int = label2_data['df'].fillna(0).sum(axis=1).iloc[list(shared_isotopes)].sum()
+                        else:
+                            label2_int = label2_data.get('intensity')
+
+                        result_dict.update({'{}_{}_ratio'.format(silac_label, silac_label2):
+                                                label1_int/label2_int if label1_int and label2_int else 'NA'})
 
                 if self.html:
                     fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
-                    x, y = [],[]
-                    cseries = light_df.fillna(0).sum(axis=1)
-                    for index, val in zip(cseries.index, cseries):
-                        x += [index,index,index]
-                        y += [0,val,0]
-                    ax = plt.plot(x,y, 'b')
-                    x, y = [],[]
-                    cseries = heavy_df.fillna(0).sum(axis=1)
-                    for index, val in zip(cseries.index, cseries):
-                        x += [index,index,index]
-                        y += [0,val,0]
-                    ax = plt.plot(x,y, 'r')
+                    cols = ['b', 'r', 'g', 'c']
+                    plt.figure()
+                    for silac_label, _ in precursors.iteritems():
+                        silac_data = data.get(silac_label)
+                        x, y = [],[]
+                        light_df = silac_data.get('df')
+                        cseries = light_df.fillna(0).sum(axis=1)
+                        for index, val in zip(cseries.index, cseries):
+                            x += [index,index,index]
+                            y += [0,val,0]
+                        ax = plt.plot(x,y, cols.pop(0) if cols else 'k')
                     ax[0].get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
                     html_images['clusters'] = os.path.join(self.html['rel'], fname)
                 if self.debug:
                     pdf.close()
-
-                quant = not heavy_df.empty
-
-                self.results.put({'peptide': scan_info.get('mod_peptide', peptide), 'heavy': heavy_int if quant else 'NA', 'light': light_int,
-                                  'scan': scanId, 'light_clusters': light_clusters,
-                                  'h_l': heavy_int/light_int if quant and light_int else 'NA',
-                                  'heavy_clusters': heavy_clusters if quant else 'NA', 'ms1': ms1,
-                                  'charge': charge, 'modifications': mods, 'light_precursor': light_precursor,
-                                  'heavy_precursor': heavy_precursor if quant else 'NA',
-                                  'cluster_ratio_deviation': cluster_rat if quant else 'NA',
-                                  'html_info': html_images,
-                                  'light_snr': signaltonoise(light_data.values) if light_data is not None else 'NA',
-                                  'heavy_snr': signaltonoise(heavy_data.values) if quant and heavy_data is not None else 'NA',})
+                if self.debug or self.html:
+                    plt.close('all')
+                result_dict.update({'html_info': html_images})
+                for silac_label, silac_data in data.iteritems():
+                    result_dict.update({
+                        '{}_intensity'.format(silac_label): silac_data['intensity'],
+                        '{}_precursor'.format(silac_label): silac_data['precursor']
+                   })
+                # print result_dict
+                self.results.put(result_dict)
                 self.cleanScans(rt_index_map, rt)
                 # print 'run tim eis', time.time()-start_time
             except:
@@ -427,7 +394,19 @@ def main():
     mass_scans = {}
     msf_scan_index = {}
 
-    heavy_masses = results.getSILACLabels()
+    silac_labels = results.getSILACLabels()
+    labels = silac_labels.keys()
+    for silac_label in labels:
+        RESULT_ORDER.extend([('{}_intensity'.format(silac_label), '{} Intensity'.format(silac_label)),
+                            ('{}_precursor'.format(silac_label), '{} Precursor'.format(silac_label))])
+        for silac_label2 in labels:
+            if silac_label != silac_label2:
+                RESULT_ORDER.extend([('{}_{}_ratio'.format(silac_label, silac_label2),
+                                     '{}/{}'.format(silac_label, silac_label2))])
+    # ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'), ('light_rt_dev', 'Light Retention Time Deviation'),
+    # ('heavy_rt_dev', 'Heavy Retention Time Deviation'), ('light_residuals', 'Light Intensity Residuals of Fit'),
+    # ('heavy_residuals', 'Heavy Intensity Residuals of Fit'), ('cluster_ratio_deviation', 'Deviation of Heavy Clusters From Light'),
+    # ('light_snr', 'Light SNR'), ('heavy_snr', 'Heavy SNR'), ('heavy_ks', 'Heavy KS'), ('light_ks', 'Light KS')
 
     sys.stderr.write('Loading Scans:\n')
     for index, i in enumerate(results):
@@ -530,10 +509,9 @@ def main():
                 res = '<tr>'
             out = []
             for i,v in zip(l.split('\t'), headers):
-                if v == 'Heavy' and 'heavy_rt' in images:
-                    out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images.get('heavy_rt'), i))
-                elif v == 'Light' and 'light_rt' in images:
-                    out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images.get('light_rt'), i))
+                rt_format = '{}_rt'.format(v.split(' ')[0])
+                if v.endswith('Intensity') and rt_format in images:
+                    out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images.get(rt_format), i))
                 elif v == 'Peptide' and 'clusters' in images:
                     out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images.get('clusters'), i))
                 else:
@@ -582,7 +560,7 @@ def main():
         result_queue = Queue()
         in_queues[filename] = in_queue
         result_queues[filename] = result_queue
-        worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, heavy_masses=heavy_masses,
+        worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, silac_labels=silac_labels,
                         temp=save_files, sparse=sparse, debug=args.debug, html=html, mono=args.no_spread)
         workers[filename] = worker
         worker.start()
