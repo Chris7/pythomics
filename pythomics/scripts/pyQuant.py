@@ -12,6 +12,7 @@ This will quantify labeled peaks (such as SILAC) in ms1 spectra. It relies solel
 
 import sys
 import os
+import copy
 import operator
 import traceback
 import pandas as pd
@@ -27,7 +28,7 @@ except ImportError:
     pass
 from Queue import Empty
 from scipy import integrate, optimize
-from scipy.stats import signaltonoise
+from scipy.stats import signaltonoise, linregress
 
 from matplotlib.backends.backend_pdf import PdfPages
 from cStringIO import StringIO
@@ -59,7 +60,10 @@ parser.add_argument('--skip', help="If true, skip scans with missing files in th
 parser.add_argument('--peptide', help="The peptide to limit quantification to.", type=str)
 parser.add_argument('--html', help="Output a HTML table summary.", action='store_true')
 parser.add_argument('--resume', help="Will resume from the last run. Only works if not directing output to stdout.", action='store_true')
+parser.add_argument('--sample', help="How much of the data to sample. Enter as a decimal (ie 1.0 for everything, 0.1 for 10%)", type=float, default=1.0)
 parser.add_argument('-o', '--out', nargs='?', help='Stuff', type=str)
+
+import random
 
 class Worker(Process):
     def __init__(self, queue=None, results=None, precision=6, raw_name=None, silac_labels=None,
@@ -139,6 +143,7 @@ class Worker(Process):
         self.data2 = pd.DataFrame(dtype='uint16')
         scan_rt_map = {}
         rt_index_map = {}
+        ms2_ms1_map = {}
         sys.stderr.write('Thread processing peptide file.\n')
         for index, i in enumerate(self.raw):
             if index % 100 == 0:
@@ -146,13 +151,23 @@ class Worker(Process):
             if i is None:
                 break
             if i.ms_level != 1:
+                ms2_ms1_map[int(i.id)] = scan_id
                 continue
-            scan_title = int(i.title)
+            scan_id = int(i.id)
             rt = i.rt
-            scan_rt_map[scan_title] = rt
-            rt_index_map[rt] = scan_title
+            scan_rt_map[scan_id] = rt
+            rt_index_map[rt] = scan_id
         sys.stderr.write('Scans Loaded\n')
         rt_index_map = pd.Series(rt_index_map)
+
+        silac_shifts = {}
+        for silac_label, silac_masses in self.silac_labels.items():
+            for mass, aas in silac_masses.iteritems():
+                pmass = float('{0:0.5f}'.format(float(mass)))
+                try:
+                    silac_shifts[mass] |= aas
+                except:
+                    silac_shifts[mass] = aas
 
         # @profile(print_stats=10, dump_stats=True)
         def run_thing(params):
@@ -164,23 +179,32 @@ class Worker(Process):
                 scanId = scan_info['id']
                 if not scan:
                     return
-                ms1 = int(scan.get('ms1'))
+                try:
+                    ms1 = int(scan.ms1_scan.title)
+                except AttributeError:
+                    ms1 = ms2_ms1_map.get(int(scan.rawId))
                 rt = scan_rt_map.get(ms1)
                 if not rt:
                     return
                 mods = scan_info.get('modifications')
-                charge = int(scan.get('charge'))
-                precursor = scan.get('mass')+config.HYDROGEN*(charge-1)
-
-                shift = scan_info['mass_shift']
+                charge = int(scan.charge)
+                precursor = float(scan.mass)+config.HYDROGEN*(charge-1)
+                shift = 0
+                for mod in filter(lambda x: x, mods.split('|')):
+                    aa, pos, mass, type = mod.split(',', 3)
+                    mass = float('{0:0.5f}'.format(float(mass)))
+                    if aa in silac_shifts.get(mass, {}):
+                        shift += mass
                 if shift > 0:
                     precursor -= shift
-                peptide = scan_info['peptide']
-                mod_pep = scan_info['mod_peptide']
+                peptide = scan.peptide
                 if self.debug:
                     sys.stderr.write('on ms {0} {1} {2} {3}\n'.format(ms1, rt, precursor, scan_info))
-                precursors = {}
+                precursors = {'Light': 0.0}
+                silac_dict = {'data': None, 'df': pd.DataFrame(), 'precursor': 'NA',
+                             'isotopes': {}, 'peaks': OrderedDict(), 'intensity': 'NA'}
                 data = OrderedDict()
+                data['Light'] = copy.deepcopy(silac_dict)
                 for silac_label, silac_masses in self.silac_labels.items():
                     silac_shift=0
                     for label_mass, label_masses in silac_masses.items():
@@ -188,8 +212,7 @@ class Worker(Process):
                         # count += len(labels)
                         silac_shift += sum(labels)
                     precursors[silac_label] = silac_shift
-                    data[silac_label] = {'data': None, 'df': pd.DataFrame(), 'precursor': 'NA',
-                                         'isotopes': {}, 'peaks': OrderedDict(), 'intensity': 'NA'}
+                    data[silac_label] = copy.deepcopy(silac_dict)
                 precursors = OrderedDict(sorted(precursors.items(), key=operator.itemgetter(1)))
                 shift_maxes = {i: j for i,j in zip(precursors.keys(), precursors.values()[1:])}
                 rt_width = int(len(rt_index_map[rt-self.rt_width:rt+self.rt_width])/2)
@@ -215,7 +238,7 @@ class Worker(Process):
                         data[precursor_label]['precursor'] = precursor_mass
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max if shift_max is not None else None
-                        envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max, charge=charge, ppm=5, heavy=precursor_shift>0 if ms_index>0 else False)
+                        envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max, charge=charge, ppm=5, heavy=False)
                         peaks_found = data[precursor_label]['peaks']
                         # look for Proline/Glutamate/Glutamines
                         # if 'P' in peptide or 'E' in peptide or 'Q' in peptide:
@@ -255,7 +278,7 @@ class Worker(Process):
                 #             shared_isotopes = shared_isotopes.intersection(found_isotopes) if shared_isotopes else found_isotopes
                 for silac_label, silac_data in data.iteritems():
                     peaks_found = silac_data.get('peaks')
-                    peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window)
+                    peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window, start_rt=rt)
                     silac_data['df'] = peak_data.get('data')
 
                     if self.debug or self.html:
@@ -282,6 +305,15 @@ class Worker(Process):
                     if not self.mono:
                         #Chris_Ecoli_1-2-4_quant_ns - pearson medium 0.82, heavy, 0.93
                         label1_int = label1_data.get('intensity')
+                        label1_array = label1_data.get('df').fillna(0).sum(axis=1)
+                        if not label1_array.empty:
+                            array1_fit = peaks.fit_data(label1_array, charge=float(charge), peptide=peptide.upper())
+                            label1_int = array1_fit.get('fit').sum()
+                            label1_res = array1_fit.get('residual')
+                            label1_data['nb'] = array1_fit.get('fit')
+                        else:
+                            label1_int = label1_array.sum()
+                            label1_res = np.inf
                         #Chris_Ecoli_1-2-4_quant_ns2 -  pearson medium 0.71, heavy 0.92
                         #label1_int = label1_data['df'].fillna(0).sum(axis=1).sum()
                     for silac_label2 in data_keys:
@@ -296,16 +328,16 @@ class Worker(Process):
                             # force the peak patterns to be in the same rough shape
                             label1_diff = label1_data['df'].fillna(0).sum(axis=1).diff().fillna(0)
                             label2_diff = label2_data['df'].fillna(0).sum(axis=1).diff().fillna(0)
-                            si2 = set([])
-                            # print label1_diff
-                            # print label2_diff
-                            # print shared_isotopes
-                            for i in sorted(list(shared_isotopes)):
-                                if self.sign(label1_diff.iloc[i]) == self.sign(label2_diff.iloc[i]):
-                                    si2.add(i)
-                                else:
-                                    break
-                            shared_isotopes = si2
+                            # si2 = set([])
+                            # # print label1_diff
+                            # # print label2_diff
+                            # # print shared_isotopes
+                            # for i in sorted(list(shared_isotopes)):
+                            #     if self.sign(label1_diff.iloc[i]) == self.sign(label2_diff.iloc[i]):
+                            #         si2.add(i)
+                            #     else:
+                            #         break
+                            # shared_isotopes = si2
 
                             # This method is inferior
                             # peaks_found = label1_data.get('peaks')
@@ -316,34 +348,96 @@ class Worker(Process):
                             ##Chris_Ecoli_1-2-4_quant_wide4 pearson: medium 0.72, heavy 0.96
                             # label1_int = peak_data.get('rt').sum()
                             ##Chris_Ecoli_1-2-4_quant_wide2 pearson: medium 0.72, heavy 0.96
-                            label1_int = label1_data['df'].fillna(0).sum(axis=1).iloc[list(shared_isotopes)].sum()
+                            i1_data = label1_data['df'].fillna(0).sum(axis=1).iloc[list(shared_isotopes)]
+                            if not i1_data.empty:
+                                array1_fit = peaks.fit_data(i1_data , charge=float(charge), peptide=peptide.upper())
+                                label1_array = array1_fit.get('fit')
+                                label1_int = array1_fit.get('fit').sum()
+                                label1_res = array1_fit.get('residual')
+                                label1_data['nb'] = array1_fit.get('fit')
+                            else:
+                                label1_int = i1_data.sum()
+                                label1_res = np.inf
 
                             # peaks_found = label2_data.get('peaks')
                             # peak_data = peaks.buildEnvelope(peaks_found=peaks_found, isotopes=shared_isotopes,
                             #                                 rt_window=rt_window)
                             # label2_int = peak_data.get('integration')
                             # label2_int = peak_data.get('rt').sum()
-                            label2_int = label2_data['df'].fillna(0).sum(axis=1).iloc[list(shared_isotopes)].sum()
+                            i2_data = label2_data['df'].fillna(0).sum(axis=1).iloc[list(shared_isotopes)]
+                            if not i2_data.empty:
+                                array2_fit = peaks.fit_data(i2_data , charge=float(charge), peptide=peptide.upper())
+                                label2_array = array2_fit.get('fit')
+                                label2_int = array2_fit.get('fit').sum()
+                                label2_res = array2_fit.get('residual')
+                                label2_data['nb'] = array2_fit.get('fit')
+                            else:
+                                label2_int = i2_data.sum()
+                                label2_res = np.inf
                         else:
-                            label2_int = label2_data.get('intensity')
+                            #label2_int = label2_data.get('intensity')
+                            label2_array = label2_data.get('df').fillna(0).sum(axis=1)
+                            if not label2_array.empty:
+                                array2_fit = peaks.fit_data(label2_array, charge=float(charge), peptide=peptide.upper())
+                                label2_int = array2_fit.get('fit').sum()
+                                label2_res = array2_fit.get('residual')
+                                label2_data['nb'] = array2_fit.get('fit')
+                            else:
+                                label2_int = label2_array.sum()
+                                label2_res = np.inf
 
-                        result_dict.update({'{}_{}_ratio'.format(silac_label, silac_label2):
-                                                label1_int/label2_int if label1_int and label2_int else 'NA'})
+                        if self.mono and not label1_array.empty and not label2_array.empty:
+                            # we want the intercept for the ratio
+                            slope, intercept, r_value, p_value, std_err = linregress(range(len(shared_isotopes)), label1_array.iloc[list(shared_isotopes)].values/label2_array.iloc[list(shared_isotopes)].values)
+                            result_dict.update({'{}_{}_ratio'.format(silac_label, silac_label2):
+                                                    intercept})
+                            result_dict.update({'{}_{}_residual'.format(silac_label, silac_label2):
+                                                    '{}'.format(abs(slope))})
+                        else:
+                            #return
+                            result_dict.update({'{}_{}_ratio'.format(silac_label, silac_label2):
+                                                    label1_int/label2_int if label1_int and label2_int else 'NA'})
+                            result_dict.update({'{}_{}_residual'.format(silac_label, silac_label2):
+                                                    '{}'.format(label1_res+label2_res)})
 
                 if self.html:
                     fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
-                    cols = ['b', 'r', 'g', 'c']
                     plt.figure()
+                    colors = ['blue', 'green', 'red', 'cyan', 'magenta', 'yellow']
+                    legends = []
                     for silac_label, _ in precursors.iteritems():
+                        color = colors.pop(0) if colors else 'black'
                         silac_data = data.get(silac_label)
                         x, y = [],[]
+                        ax = plt.subplot(2, 1, 1)
+                        cseries = silac_data.get('nb')
+                        if cseries is not None:
+                            for index, val in zip(cseries.index, cseries):
+                                x += [index,index,index]
+                                y += [0,val,0]
+                            ax.bar(cseries.index, cseries.values, width=1.0/float(charge)/2,
+                                         color='{}'.format(color), alpha=0.7, label=silac_label)
+                        x, y = [],[]
                         light_df = silac_data.get('df')
+                        ax = plt.subplot(2, 1, 2)
                         cseries = light_df.fillna(0).sum(axis=1)
                         for index, val in zip(cseries.index, cseries):
                             x += [index,index,index]
                             y += [0,val,0]
-                        ax = plt.plot(x,y, cols.pop(0) if cols else 'k')
-                    ax[0].get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
+                        line = ax.plot(x,y, '{}'.format(color), alpha=0.7)
+                        legends.append((line[0], silac_label))
+
+                    # Put a legend above our top plot
+                    # shift our plots down
+                    for i in xrange(1,3):
+                        ax = plt.subplot(2, 1, i)
+                        box = ax.get_position()
+                        # set_position is [left, bottom, width, height]
+                        ax.set_position([box.x0, box.y0 - box.height * 0.1,
+                                         box.width, box.height * 0.9])
+                    ax.get_figure().legend([i[0] for i in legends], [i[1] for i in legends], loc='upper center',
+                                           fancybox=True, shadow=True, ncol=3)
+                    ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
                     html_images['clusters'] = os.path.join(self.html['rel'], fname)
                 if self.debug:
                     pdf.close()
@@ -403,25 +497,26 @@ def main():
             if silac_label != silac_label2:
                 RESULT_ORDER.extend([('{}_{}_ratio'.format(silac_label, silac_label2),
                                      '{}/{}'.format(silac_label, silac_label2))])
+                RESULT_ORDER.extend([('{}_{}_residual'.format(silac_label, silac_label2),
+                                     '{}/{} residual'.format(silac_label, silac_label2))])
     # ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'), ('light_rt_dev', 'Light Retention Time Deviation'),
     # ('heavy_rt_dev', 'Heavy Retention Time Deviation'), ('light_residuals', 'Light Intensity Residuals of Fit'),
     # ('heavy_residuals', 'Heavy Intensity Residuals of Fit'), ('cluster_ratio_deviation', 'Deviation of Heavy Clusters From Light'),
     # ('light_snr', 'Light SNR'), ('heavy_snr', 'Heavy SNR'), ('heavy_ks', 'Heavy KS'), ('light_ks', 'Light KS')
 
     sys.stderr.write('Loading Scans:\n')
+    sample = args.sample
     for index, i in enumerate(results):
         if index%1000 == 0:
             sys.stderr.write('.')
         if args.peptide and args.peptide.lower() != i.peptide.lower():
             continue
+        if not args.peptide and (sample != 1.0 and random.random() < sample):
+            continue
         specId = str(i.rawId)
         if specId in mass_scans:
             continue
-        shift = 0.0
-        for mod in i.mods:
-            if 'Label' in mod[3]:
-                shift += float(mod[2])
-        mass_scans[specId] = {'id': specId, 'peptide': i.peptide, 'mod_peptide': i.modifiedPeptide, 'mass_shift': shift, 'rt': i.rt, 'charge': i.charge, 'modifications': i.getModifications()}
+        mass_scans[specId] = {'id': specId, 'peptide': i.peptide, 'mod_peptide': i.modifiedPeptide, 'rt': i.rt, 'charge': i.charge, 'modifications': i.getModifications()}
 
     msf_scans = {}
 
@@ -440,21 +535,20 @@ def main():
     for specId, i in mass_scans.iteritems():
         if index%1000 == 0:
             sys.stderr.write('.')
-        # import pdb; pdb.set_trace();
         scan = msf_scans.get((specId, i.get('peptide')))
         fname = os.path.splitext(scan.file)[0]
         if fname not in hdf_filemap:
-            if skip:
-                continue
-            sys.stderr.write('{0} not found in filemap. Filemap is {1}.'.format(fname, hdf_filemap))
-            return 1
+            fname = os.path.split(fname)[1]
+            if fname not in hdf_filemap:
+                if skip:
+                    continue
+                sys.stderr.write('{0} not found in filemap. Filemap is {1}.'.format(fname, hdf_filemap))
+                return 1
         i['file'] = fname
-        i['ms1'] = scan.ms1_scan.title
         try:
             raw_files[fname].append((i.get('rt'), i))
         except KeyError:
             raw_files[fname] = [(i.get('rt'), i)]
-        msf_scan_index[(specId, i.get('peptide'))] = {'mass': scan.mass, 'charge': scan.charge, 'ms1': scan.ms1_scan.title}
 
     # sort by RT so we can minimize our memory footprint by throwing away scans we no longer need
     for i in raw_files.keys():
@@ -575,7 +669,7 @@ def main():
             #     continue
             params = {}
             params['scan_info'] = v
-            scan = msf_scan_index.get((v.get('id'), v.get('peptide')))
+            scan = msf_scans.get((v.get('id'), v.get('peptide')))
             params['scan'] = scan
             in_queue.put(params)
 
