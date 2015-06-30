@@ -111,7 +111,7 @@ def mapper(peptides):
             'proteins': [],
             'positions': [],
             'matches': [],
-            'accessions': accessions,
+            'accessions': [],
             'unique': True
         }
     return matched
