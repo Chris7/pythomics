@@ -17,7 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 __author__ = 'Chris Mitchell'
 
-import sys, copy, struct, base64, gzip, operator
+import sys, copy, struct, base64, gzip, operator, decimal
 from os import path
 import pythomics.templates as templates
 from pythomics.proteomics.structures import PeptideObject, ScanObject, Chromatogram
@@ -159,6 +159,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.charge = charge
             title = dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
             scanObj.title = title
+            scanObj.id = title
             scanObj.rt = float(rt)
             try:
                 title = int(title)
@@ -486,94 +487,123 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
     """
     def __init__(self, filename, **kwrds):
         super(XTandemXMLIterator, self).__init__(filename)
-        #parse in our X!Tandem xml file
-        if kwrds and kwrds['exclude']:
-            exclude = set(kwrds['exclude'])
-        else:
-            exclude = set()
+        # parse modifications
+        specs = [i[1] for i in etree.iterparse(self.filename, tag='group') if i[1].attrib.get('label') == 'input parameters'][0]
+        # X!tandem will have definitions including carboxy methyl,etc. so we just search for K/R until there is a better solution
+        # to definitively identify SILAC label schemes
+        self.silac_labels = {'Light': {}}
+        silac_parse = r'(?:(?P<mass>[0-9\.]+)\@(?P<residue>[KR]))'
+        for i in specs.iter(tag='note'):
+            if 'residue, modification mass' in i.attrib.get('label'):
+                silac_matches = [j for j in re.finditer(silac_parse, i.text)]
+                label_names = []
+                masses = {}
+                if silac_matches:
+                    for silac_match in silac_matches:
+                        aa, mass = silac_match.group('residue'), silac_match.group('mass')
+                        label_names.append(silac_match.group())
+                        # X!Tandem has 5 digits precision for masses, don't go over this
+                        mass = float('{0:.5f}'.format(float(mass)))
+                        try:
+                            masses[mass].add(aa)
+                        except KeyError:
+                            masses[mass] = set([aa])
+                if masses:
+                    self.silac_labels[','.join(label_names)] = masses
+
         try:
-            dom1 = etree.parse(self.filename)
-            self.lxml = True
+            # we cannot use iterparse here because for some reason we randomly get screwed up on X!tandems namespaces with lxml
+            self.group = etree.parse(self.filename.name).iterfind("group")
         except NameError:
-            self.lxml = False
             sys.stderr.write('XTandem parsing unavailable: lxml is required to parse X!tandem xml files due to the namespaces employed\n')
             return
-        if self.lxml:
-            self.group = dom1.findall("group")
-            self.scans = {}
-            self.num = len(self.group)
-        else:
-            #this isn't implemented
-            self.nest = 0
-        self.startIter = True
-        self.db = None
+        self.scans = {}
+        self.num = 1
 
     def __iter__(self):
         return self
 
-    def parselxml(self, group):
-        try:
-            expect = group.attrib["expect"]
-        except KeyError:
-            self.next()
-        subnote = list(group.iter("note"))
-        for i in subnote:
-            if (i.attrib["label"] == "Description"):
-                experiment = i.text.strip()
-        charge = group.attrib["z"]
-        premass = group.attrib["mh"]
-        rt = group.attrib["rt"]
-        proteins = list(group.iter("protein"))
-        fullProtein = ""
-        for protein in proteins:
-            scanObj = PeptideObject()
-            scanObj.charge = charge
-            scanObj.mass =premass*int(charge)
-            if rt:
+    def parseModel(self, element):
+        charge = element.attrib.get("z", 'NA')
+        premass = element.attrib.get("mh", 'NA')
+        rt = element.attrib.get("rt", 'NA')
+        scanObj = PeptideObject()
+        scanObj.charge = charge
+        scanObj.mass = float(premass)
+        if rt:
+            try:
                 scanObj.rt = float(rt)
-            sgroup = group.iter("group")
-            for i in sgroup:
-                #This is horridly inefficient...
-                if "fragment ion mass spectrum" in i.attrib["label"]:
-                    ab = i.iter('{http://www.bioml.com/gaml/}Xdata')
-                    for j in ab:
-                        mzIter = j.iter('{http://www.bioml.com/gaml/}values')
-                        for k in mzIter:
-                            mz = [mval for mval in k.text.strip().replace('\n',' ').split(' ')]
-                    ab = i.iter('{http://www.bioml.com/gaml/}Ydata')
-                    for j in ab:
-                        mzIter = j.iter('{http://www.bioml.com/gaml/}values')
-                        for k in mzIter:
-                            inten = [mval for mval in k.text.strip().replace('\n',' ').split(' ')]
-                    for j,k in zip(mz,inten):
-                        scanObj.scans.append((float(j),float(k)))
-            domain = list(protein.iter("domain"))[0]#we only have one domain per protein instance
-            note = list(protein.iter("note"))[0]#same here
-            mods = list(protein.iter("aa"))#we can have multiple modifications
-            if not self.db:
-                files = list(protein.iter("file"))
-                self.db = files[0].attrib["URL"]
-            id = domain.attrib["id"]
-            start = domain.attrib["start"]
-            end = domain.attrib["end"]
-            peptide = domain.attrib["seq"].replace(' ','')#for some reason it can have spaces
-            pExpect = domain.attrib["expect"]
-            for mod in mods:
-                scanObj.addModification(mod.attrib["type"],int(mod.attrib["at"])-1,float(mod.attrib["modified"]), False)
-            scanObj.peptide = peptide
-            scanObj.expect = float(pExpect)
-            scanObj.id = id
-            scanObj.title = id
-            scanObj.acc = note.text
-            self.scans[id] = scanObj
+            except ValueError:
+                scanObj.rt = rt
+
+        scanObj.file = self.filename.name
+
+        support = element.iterfind("group")
+        for i in support:
+            if i.attrib["label"] == "fragment ion mass spectrum":
+                _id = i.find('{http://www.bioml.com/gaml/}trace').attrib['id']
+                scanObj.id = _id
+                scanObj.title = _id
+                ab = i.iter('{http://www.bioml.com/gaml/}Xdata')
+                for j in ab:
+                    mzIter = j.iter('{http://www.bioml.com/gaml/}values')
+                    for k in mzIter:
+                        mz = [mval for mval in k.text.strip().replace('\n',' ').split(' ')]
+                ab = i.iter('{http://www.bioml.com/gaml/}Ydata')
+                for j in ab:
+                    mzIter = j.iter('{http://www.bioml.com/gaml/}values')
+                    for k in mzIter:
+                        inten = [mval for mval in k.text.strip().replace('\n',' ').split(' ')]
+                try:
+                    scanObj.scans = [(float(j), float(k)) for j,k in zip(mz, inten)]
+                except:
+                    return None
+
+        proteins = element.iterfind("protein")
+        accessions = []
+        added = False
+        for peptide_index, protein in enumerate(proteins):
+            accessions.append(protein.attrib.get('label'))
+            # if we're the first one, setup the peptide and modification info
+            if added is False:
+                try:
+                    #we only have multiple domains per protein instance, we use one of them here since we make it relative to the peptide anyways
+                    domain = list(protein.iter("domain"))[0]
+                except Exception as e:
+                    sys.stderr.write('{}\n'.format(e))
+                    continue
+                added = True
+                mods = domain.iter("aa")#we can have multiple modifications
+                start = int(domain.attrib["start"])
+                peptide = domain.attrib["seq"].replace(' ','')#for some reason it can have spaces
+                pExpect = domain.attrib["expect"]
+                scanObj.expect = float(pExpect)
+                for mod in mods:
+                    scanObj.addModification(mod.attrib["type"], int(mod.attrib["at"])-start, float(mod.attrib["modified"]), mod.attrib["modified"])
+                scanObj.peptide = peptide
+
+        scanObj.acc = ';'.join(accessions)
+        self.scans[scanObj.id] = scanObj
         return scanObj
+
+    def parselxml(self, element):
+        group_type = element.attrib.get('type')
+        if group_type == 'model':
+            scan = self.parseModel(element)
+            return scan
+        return None
 
     def next(self):
         if self.group:
-            group = self.group.pop(0)
+            element = self.group.next()
+            while element.getparent().tag != 'bioml':
+                element = self.group.next()
+            scan = self.parselxml(element)
+            while scan is None:
+                scan = self.next()
+            return scan
         else:
             raise StopIteration
-        return self.parselxml(group)
 
     def getScan(self, id, peptide=None):
         try:
@@ -583,6 +613,21 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
 
     def getProgress(self):
         return len(self.scans)*100/self.num
+
+    def getSILACLabels(self):
+        return self.silac_labels
+
+    def getScans(self, modifications=True, fdr=True):
+        """
+        get a random scan
+        """
+        if not self.scans:
+            for i in self:
+                yield i
+        else:
+            for i in self.scans.values():
+                yield i
+        yield None
 
 class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename, **kwrds):
@@ -884,7 +929,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
             rms = prot.getRMSDeltas(self.results)
             for i in range(1, 1+ num_peps) :
                 query = prot.getPeptideQuery(i)
-                p     = prot.getPeptideP(i)
+                p = prot.getPeptideP(i)
                 if p != -1 and query != -1:
                     pep = self.results.getPeptide(query, p)
                     rank = pep.getRank()
