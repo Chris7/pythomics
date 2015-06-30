@@ -34,7 +34,17 @@ class ScanObject(object):
         self.scans = []
         self.rt = 0.0
         self.ms_level = None
-        self.rawId = None
+        self._rawId = None
+
+    @property
+    def rawId(self):
+        if self._rawId is None:
+            return getattr(self, 'id', None)
+        return self._rawId
+
+    @rawId.setter
+    def rawId(self, value):
+        self._rawId = value
 
     def writeScan(self, o):
         o.write('BEGIN IONS\n')
@@ -79,14 +89,14 @@ class PeptideObject(ScanObject):
             smass = str(tmass)
             prec = len(str(tmass-int(tmass)))-2
             precFormat = '%'+'0.%df'%prec
-            modType = ""
-            masses = config.MODIFICATION_MASSES
-            for i in masses:
-                if tmass in masses[i] or smass == precFormat%masses[i][0]:
-                    #found it
-                    modType = i
-            if not modType:
-                sys.stderr.write('mod not found %s\n'%modMass)
+            # modType = ""
+            # masses = config.MODIFICATION_MASSES
+            # for i in masses:
+            #     if tmass in masses[i] or smass == precFormat%masses[i][0]:
+            #         #found it
+            #         modType = i
+            # if not modType:
+            #     sys.stderr.write('mod not found %s\n'%modMass)
         self.mods.add((aa,str(position),str(modMass),str(modType)))
 
     def getModifications(self):
@@ -97,7 +107,7 @@ class PeptideObject(ScanObject):
         peptide = list(self.peptide)
         for i in self.mods:
             aa, pos = i[0], int(i[1])
-            assert peptide[pos] is aa, 'Amino acid is not equal to modification amino acid'
+            assert peptide[pos].upper() == aa.upper(), 'Amino acid {} in is not equal to modification amino acid {}'.format(peptide[pos], aa)
             peptide[pos] = aa.lower()
         return ''.join(peptide)
 
