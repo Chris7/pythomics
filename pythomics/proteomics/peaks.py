@@ -23,18 +23,19 @@ ETNS = {1: {'C': .0110, 'H': 0.00015, 'N': 0.0037, 'O': 0.00038, 'S': 0.0075},
         4: {'S': 0.00020}}
 
 def calculate_theoretical_distribution(peptide):
-    def dio_brute(n):
-        x = 1
-        y = 2
-        z = 4
-        for i in xrange(0,int(n/x)+1):
-            for j in xrange(0,int(n/y)+1):
-                for k in xrange(0,int(n/z)+1):
-                    if i*x + j*y + k*z == n:
-                        yield (i, j, k)
-
-    def dio_solve(x):
-        return [combination for combination in dio_brute(x) if combination is not None]
+    def dio_solve(n, l=None, index=0, out=None):
+        if l is None:
+            l = [1,2,4]
+        if out is None:
+            out = [0]*len(l)
+        if index != len(l):
+            for i in xrange(int(n/l[index])+1):
+                out[index] = i
+                for j in dio_solve(n, l=l, index=index+1, out=out):
+                    yield j
+        else:
+            if n == sum([a*b for a,b in zip(l,out)]):
+                yield out
 
     ETN_P = {}
     element_composition = {}
