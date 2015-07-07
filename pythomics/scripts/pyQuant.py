@@ -225,6 +225,7 @@ class Worker(Process):
                 rt_window = []
                 ms_index = 0
                 delta = -1
+                theo_dist = peaks.calculate_theoretical_distribution(peptide.upper())
                 while True:
                     if len(finished) == len(precursors.keys()):
                         break
@@ -238,7 +239,8 @@ class Worker(Process):
                         data[precursor_label]['precursor'] = precursor_mass
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max if shift_max is not None else None
-                        envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max, charge=charge, ppm=5, heavy=False)
+                        envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max,
+                                                      charge=charge, ppm=5, heavy=False, theo_dist=theo_dist)
                         peaks_found = data[precursor_label]['peaks']
                         # look for Proline/Glutamate/Glutamines
                         # if 'P' in peptide or 'E' in peptide or 'Q' in peptide:

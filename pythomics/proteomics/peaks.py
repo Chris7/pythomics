@@ -317,7 +317,23 @@ def buildEnvelope(peaks_found=None, isotopes=None, gradient=False, rt_window=Non
     int_val = integrate.trapz(rt_data.values, rt_data.index.values) if not rt_data.empty else 0
     return {'data': df, 'integration': int_val, 'rt': rt_data}
 
-def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False, heavy=False, isotope_offset=0, peptide=None):
+import copy
+def looper(selected=None, df=None, theo=None, index=0, out=None):
+    if out is None:
+        out = [0]*len(selected)
+    if index != len(selected):
+        for i in selected[index]:
+            out[index] = i
+            for j in looper(selected=selected, df=df, theo=theo, index=index+1, out=out):
+                yield j
+    else:
+        vals = pd.Series([df[i] for i in out])
+        vals = vals/vals.max()
+        residual = ((theo-vals)**2).sum()
+        yield (residual, copy.deepcopy(out))
+
+def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False,
+                 heavy=False, isotope_offset=0, theo_dist=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
     start_mz = start_mz/float(charge) if isotope_offset == 0 else (start_mz+isotope_offset*NEUTRON)/float(charge)
@@ -343,15 +359,15 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False, h
             return empty_dict
         attempts += 1
         isotope_index += 1
-    # check behind us for a peak, if we find one taller than us, quit because we're in a contaminant, or we're in a non-modified
-    # version of the peptide
-    con_mz = start_mz-spacing
-    con_non_empty_ind = non_empty.index.searchsorted(con_mz)
-    con_start = non_empty.index[non_empty_ind]
-    if abs(start-start_mz)/start <= tolerance:
-        # we found one
-        if non_empty[start] < non_empty[con_start]:
-            return empty_dict
+    # # check behind us for a peak, if we find one taller than us, quit because we're in a contaminant, or we're in a non-modified
+    # # version of the peptide
+    # con_mz = start_mz-spacing
+    # con_non_empty_ind = non_empty.index.searchsorted(con_mz)
+    # con_start = non_empty.index[non_empty_ind]
+    # if abs(start-start_mz)/start <= tolerance:
+    #     # we found one
+    #     if non_empty[start] < non_empty[con_start]:
+    #         return empty_dict
     # we reset the isotope_index back to 1 here, so on the subsequent steps we aren't looking
     isotope_index += isotope_offset
     # find the largest intensity within our tolerance
@@ -359,16 +375,19 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False, h
     start = start_df.idxmax()
     start_index = df.index.searchsorted(start)
     # find the largest in our tolerance
-    env_dict[isotope_index] = start_index
+    # env_dict[isotope_index] = start_index
+    valid_locations2 = OrderedDict()
+    valid_locations2[isotope_index] = list(start_df.index)
 
     # micro means return the 'micro envelope' which is the envelope of each isotopic cluster, start with our beginning isotope
-    micro_dict[isotope_index] = findMicro(df, start_index, ppm=ppm)
+    # micro_dict[isotope_index] = findMicro(df, start_index, ppm=ppm)
     isotope_index += 1
     pos = non_empty_ind+1
     offset = isotope_index*spacing
     df_len = non_empty.shape[0]
     last_displacement = None
     valid_locations = set([])
+
     while pos < df_len:
         # search for the ppm error until it rises again, we select the minima and if this minima is
         # outside our ppm error, we stop the expansion of our isotopic cluster
@@ -385,14 +404,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False, h
             valid_locations.add(current_loc)
         if valid_locations and displacement > last_displacement:
             # pick the largest peak within our error tolerance
-            largest_loc = df[valid_locations].idxmax()
-            # min_loc, max_loc = df.index.searchsorted(min(valid_locations)), df.index.searchsorted(max(valid_locations))
-            # search out and create the micro envelope for this
-            micro_index = df.index.searchsorted(largest_loc)
-            # micro_envelopes.append((min_loc, max_loc+1))#self.findMicro(df, micro_index, charge=charge))
-            micro_dict[isotope_index] = findMicro(df, micro_index, ppm=ppm)
-            env_dict[isotope_index] = micro_index
-            ppm_dict[isotope_index] = abs(abs(start-largest_loc)-offset)/largest_loc
+            valid_locations2[isotope_index] = valid_locations
             isotope_index += 1
             offset = spacing*isotope_index
             displacement = abs(abs(start-current_loc)-offset)/current_loc
@@ -407,6 +419,20 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False, h
 
     #combine any overlapping micro envelopes
     #final_micros = self.merge_list(micro_dict)
+    valid_keys = sorted(set(valid_locations2.keys()).intersection(theo_dist.keys()))
+    valid_vals = [valid_locations2[i] for i in valid_keys]
+    valid_theor = pd.Series([theo_dist[i] for i in valid_keys])
+    valid_theor = valid_theor/valid_theor.max()
+    best_locations = sorted(looper(selected=valid_vals, df=df, theo=valid_theor), key=itemgetter(0))[0][1]
+    # min_loc, max_loc = df.index.searchsorted(min(valid_locations)), df.index.searchsorted(max(valid_locations))
+    # search out and create the micro envelope for this
+    # micro_envelopes.append((min_loc, max_loc+1))#self.findMicro(df, micro_index, charge=charge))
+    for index, isotope_index in enumerate(valid_keys):
+        largest_loc = best_locations[index]
+        micro_index = df.index.searchsorted(largest_loc)
+        micro_dict[isotope_index] = findMicro(df, micro_index, ppm=ppm)
+        env_dict[isotope_index] = micro_index
+        ppm_dict[isotope_index] = 0#abs(abs(start-largest_loc)-offset)/largest_loc
     return {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
 
 
