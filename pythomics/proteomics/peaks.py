@@ -205,8 +205,22 @@ def findMicro(df, pos, ppm=None):
     df_empty_index = df[df==0].index
     right = df_empty_index.searchsorted(df.index[pos])
     left = right-1
-    return (df.index.searchsorted(df_empty_index[left])-1,
+    left, right = (df.index.searchsorted(df_empty_index[left]),
             df.index.searchsorted(df_empty_index[right]))
+    y = df.iloc[left:right]
+   # if df.index[pos] > 620 and df.index[pos] < 621:
+    #    print df.index[pos],y
+    # new logic is nm
+    maximas = y.iloc[argrelmax(y.fillna(0).values, order=2)[0]]
+    # check for peaks outside our window
+    if len(maximas) > 1:
+        start_pos = y.index.searchsorted(df.index[pos])
+        left, right = findPeak(y, start_pos)
+        left = df.index.searchsorted(y.index[left])
+        if right == len(y):
+            right = len(y)-1
+        right = df.index.searchsorted(y.index[right])
+    return left, right
 
 def merge_list(starting_list):
     final_list = []
@@ -218,14 +232,137 @@ def merge_list(starting_list):
     final_list.append(starting_list[-1])
     return final_list
 
-def buildEnvelope(peaks_found=None, isotopes=None, gradient=False, rt_window=None, start_rt=None):
+def gaussian(height, center_x, center_y, width_x, width_y, index=None, columns=None):
+    """Returns a gaussian function with the given parameters"""
+    width_x = float(width_x)
+    width_y = float(width_y)
+    return [height*np.exp(-(((center_x-i)/width_x)**2+((center_y-j)/width_y)**2)/2) for i in index for j in columns.astype(float)]
+
+def moments(data):
+    """Returns (height, x, y, width_x, width_y)
+    the gaussian parameters of a 2D distribution by calculating its
+    moments """
+    total = data.sum()
+    X, Y = np.indices(data.shape)
+    x = (X*data).sum()/total
+    y = (Y*data).sum()/total
+    col = data[:, int(y)]
+    width_x = 0.3#sqrt(abs((arange(col.size)-y)**2*col).sum()/col.sum())
+    row = data[int(x), :]
+    width_y = 1#sqrt(abs((arange(row.size)-x)**2*row).sum()/row.sum())
+    height = data.max()
+    return height, x, y, width_x, width_y
+
+def errorfunction(params, si, srt, df):
+    params[1] = si
+    params[2] = srt
+    data = df.fillna(0)
+    return np.ravel(gaussian(*params, index=data.index, columns=data.columns)) - np.ravel(data.values)
+
+def fitgaussian(data, si=None, srt=None):
+   """Returns (height, x, y, width_x, width_y)
+   the gaussian parameters of a 2D distribution found by a fit"""
+   params = moments(data.fillna(0).values)
+   p, success = optimize.leastsq(errorfunction, params, args=(si, srt, data))
+   return p, success
+
+def findPeak(y, srt):
+    # check our SNR, if it's low, lessen our window
+    snr = y.mean()/y.std()
+    y_snr = y.iloc[srt]/y.std()
+    left_offset = 1 if y.iloc[srt] < snr else 2
+    right_offset = 2 if y.iloc[srt] < snr else 3
+    lsrt = srt-left_offset if srt-left_offset > 0 else 0
+    rsrt = srt+right_offset if srt+right_offset < len(y) else len(y)
+    peak = y.iloc[srt]
+    left = 0
+    grad = y.iloc[lsrt:rsrt].values
+    shift = sum(np.sign(np.gradient(grad)))
+    shift = 'left' if shift < 0 else 'right'
+    ishift = shift
+    slope_shifts = 0
+    last_slope = -1
+    for left in xrange(srt-1, -1, -1):
+        val = y.iloc[left]
+        grad = y.iloc[left-2:left+1]
+        slope = None
+        if len(grad) >= 2:
+            slope = sum(np.sign(np.gradient(grad)))
+            if slope < 0:
+                slope = 'right'
+            elif slope > 0:
+                slope = 'left'
+        if last_slope != -1:
+            if last_slope != slope and slope != None:
+                slope_shifts += 1
+        last_slope = slope
+        #print ishift, slope, left, last_slope,slope_shifts
+        if ishift == 'right' and ishift == slope:
+            break
+        if ishift == 'left' and slope == 'right' and slope_shifts > 1:
+            break
+        if val == 0 or (val > peak and slope != 'right'):
+            if val == 0 or shift != 'left':
+                break
+        elif shift == 'left' and slope != 'right':# slope != right logic: newsl
+            shift = None
+    right = len(y)
+    shift = ishift
+    highest_val = peak
+    slope_shifts = 0
+    last_slope = -1
+    for right in xrange(srt+1, len(y)):
+        val = y.iloc[right]
+        grad = y.iloc[right:right+3]
+        slope = None
+        if len(grad) >= 2:
+            slope = sum(np.sign(np.gradient(grad)))
+            if slope < 0:
+                slope = 'right'
+            elif slope > 0:
+                slope = 'left'
+        if last_slope != -1:
+            if last_slope != slope and slope != None:
+                slope_shifts += 1
+        last_slope = slope
+        if ishift == 'left' and ishift == slope:
+            break
+        if ishift == 'right' and slope == 'left' and slope_shifts > 1:
+            break
+        if val == 0 or (val > peak and slope != 'left'):
+            if val > highest_val:
+                highest_val = val
+            if val == 0 or shift != 'right':
+                if val == 0:
+                    right += 1
+                break
+        elif shift == 'right' and slope != 'left':
+            shift = None
+            peak = highest_val
+    return left, right
+
+def findValleys(y, srt):
+    peak = y.iloc[srt]
+    for left in xrange(srt-1, -1, -1):
+        val = y.iloc[left]
+        if val == 0 or val > peak:
+            break
+    right = len(y)
+    for right in xrange(srt+1, len(y)):
+        val = y.iloc[right]
+        if val == 0 or val > peak:
+            break
+    return left, right
+
+def buildEnvelope(peaks_found=None, isotopes=None, gradient=False, rt_window=None, start_rt=None, silac_label=None):
     isotope_index = {}
     df = pd.DataFrame(columns=rt_window if rt_window is not None else [])
     for silac_isotope, isotope_data in peaks_found.iteritems():
         if isotopes and silac_isotope not in isotopes:
             continue
-        switch = False
-        last_val = 0
+        # switch = False
+        # last_val = 0
+        temp_data = []
         for envelope, micro_envelope in zip(
                 isotope_data.get('envelope', []),
                 isotope_data.get('micro_envelopes', [])):
@@ -243,79 +380,99 @@ def buildEnvelope(peaks_found=None, isotopes=None, gradient=False, rt_window=Non
                     series_index = temp_series.idxmax()
                     isotope_index[silac_isotope] = series_index
                 temp_int = integrate.simps(temp_series.values)
-                if gradient:
-                    if temp_int > last_val and switch is False:
-                        pass
-                    elif temp_int > last_val and switch is True:
-                        break
-                    elif temp_int < last_val and switch is True:
-                        pass
-                    elif temp_int < last_val and switch is False:
-                        switch = True
-                        pass
-                last_val = temp_int
-                if series_index in df.index:
-                    if rt in df and not pd.isnull(df.loc[series_index, rt]):
-                        df.loc[series_index, rt] += temp_int
-                    else:
-                        df.loc[series_index, rt] = temp_int
+                temp_mean = np.average(temp_series.index.values, weights=temp_series.values)
+                temp_data.append((temp_mean, {'int': temp_int, 'index': series_index, 'rt': rt}))
+        # methd -- micro_ol
+        exclude = {}
+        data = [i[0] for i in temp_data]
+        if len(data) > 4:
+            data_median, data_std = np.median(data), np.std(data)
+            cutoff = 2*data_std
+            cut_fun = lambda i: abs(i-data_median)>cutoff
+            exclude = set(filter(cut_fun, data))
+        for i in temp_data:
+            if i[0] in exclude:
+                continue
+            temp_int = i[1]['int']
+            series_index = i[1]['index']
+            rt = i[1]['rt']
+            #print temp_series
+            # if gradient:
+            #     if temp_int > last_val and switch is False:
+            #         pass
+            #     elif temp_int > last_val and switch is True:
+            #         break
+            #     elif temp_int < last_val and switch is True:
+            #         pass
+            #     elif temp_int < last_val and switch is False:
+            #         switch = True
+            #         pass
+            # last_val = temp_int
+            if series_index in df.index:
+                if rt in df and not pd.isnull(df.loc[series_index, rt]):
+                    df.loc[series_index, rt] += temp_int
                 else:
-                    df = df.append(pd.DataFrame(temp_int, columns=[rt], index=[series_index]))
+                    df.loc[series_index, rt] = temp_int
+            else:
+                df = df.append(pd.DataFrame(temp_int, columns=[rt], index=[series_index]))
 
     # THis is experimental
-    ndfs = []
-    from scipy.signal import argrelmax
-    closest = sorted([(i, abs(float(v)-start_rt)) for i,v in enumerate(df.columns)], key=itemgetter(1))[0][0]
-    for index, values in df.iterrows():
-        y = values.fillna(0)
-        maximas = y.iloc[argrelmax(y.fillna(0).values)[0]]
-        # check for peaks outside our window
-        neighboring_peaks = filter(lambda x: x>0.2, maximas.index-start_rt)
-        if not neighboring_peaks and len(maximas) <= 1:
-            ndfs.append(pd.DataFrame(y))
-            continue
-        srt = sorted([(i, abs(float(v[0])-start_rt)) for i,v in enumerate(y.iteritems()) if v[1]], key=itemgetter(1))[0][0]
-        if abs(srt-closest) > 2:
-            continue
-        # find the left/right from our peak
-        peak = y.iloc[srt]
-        left=0
-        # find the gradient
-        if any([i for i in y.iloc[-2:srt+1][-2:] if i<peak]):
-            # increasing to the right
-            shift = 'right'
-        else:
-            shift = 'left'
-        for left in xrange(srt-1, -1, -1):
-            val = y.iloc[left]
-            if val == 0 or val > peak:
-                if val == 0 or shift != 'left':
+    # so is this
+    if not df.empty:
+        if silac_label == 'Heavy':
+            pass
+        delta_df = pd.rolling_apply(df, 2, lambda x: x[1]/x[0]).fillna(0)
+        ndfs = []
+        indices = df.index
+        for index, row in delta_df.T.iterrows():
+            exclude = False
+            for i,v in enumerate(row):
+                if v > 3:
+                    exclude = True
                     break
-            elif shift == 'left':
-                shift = None
-        right = len(y)
-        highest_val = peak
-        for right in xrange(srt+1, len(y)):
-            val = y.iloc[right]
-            if val == 0 or val > peak:
-                if val > highest_val:
-                    highest_val = val
-                if val == 0 or shift != 'right':
-                    if val == 0:
-                        right += 1
-                    break
-            elif shift == 'right':
-                shift = None
-                peak = highest_val
-        ndfs.append(pd.DataFrame(y.iloc[left:right]))
+            ndfs.append(df.loc[indices[:i] if exclude else indices,index])
+        df = pd.concat(ndfs, axis=1) if ndfs else df
 
-    df = pd.concat(ndfs, axis=1).T if ndfs else df
+        ndfs = []
+        from scipy.signal import argrelmax
+        closest = sorted([(i, abs(float(v)-start_rt)) for i,v in enumerate(df.columns)], key=itemgetter(1))[0][0]
+        isotope_coms = []
+        for index, values in df.iterrows():
+            y = values.fillna(0)
+            maximas = y.iloc[argrelmax(y.fillna(0).values)[0]]
+            if len(maximas) == 0:
+                ndfs.append(pd.DataFrame(y))
+                continue
+            # check for peaks outside our window
+            # neighboring_peaks = filter(lambda x: abs(x)>0.3, maximas.index-start_rt)
+            # if not neighboring_peaks and len(maximas) <= 1:
+            #     ndfs.append(pd.DataFrame(y))
+            #     continue
+            peaks = sorted([(index, abs(float(index)-start_rt), v) for index, v in maximas.iteritems() if v], key=itemgetter(1))
+            # choose the peak closest to our retention time
+            # if any([i for i in peaks if i[1]<0.30]):
+            #     peaks.sort(key=itemgetter(2), reverse=True)
+            #     srt = y.index.searchsorted(peaks[0][0])
+            # else:
+            srt = y.index.searchsorted(peaks[0][0])
+            # find the left/right from our peak
+            # see if we're increasing to the left, otherwise assume we are to the right
+            left, right = findPeak(y, srt)
+            peak_data = y.iloc[left:right]
+            peak_com = np.average(peak_data.index, weights=peak_data.values)
+            isotope_coms.append(peak_com)
+            # new logic -- valleys -- don't use
+            # if abs(peak_com-start_rt) > 0.25:
+                # we are too far away from our starting RT, find the local peak and use it
+                # left, right = findValleys(y, srt)
+            ndfs.append(pd.DataFrame(y.iloc[left:right]))
+        df = pd.concat(ndfs, axis=1).T if ndfs else df
     # THis is experimental
 
     rt_data = df.fillna(0).sum(axis=0).sort_index()
     rt_data.index = rt_data.index.astype(float)
     int_val = integrate.trapz(rt_data.values, rt_data.index.values) if not rt_data.empty else 0
-    return {'data': df, 'integration': int_val, 'rt': rt_data}
+    return {'data': df, 'integration': rt_data.fillna(0).sum(), 'rt': rt_data}
 
 import copy
 def looper(selected=None, df=None, theo=None, index=0, out=None):
@@ -328,12 +485,12 @@ def looper(selected=None, df=None, theo=None, index=0, out=None):
                 yield j
     else:
         vals = pd.Series([df[i] for i in out])
-        vals = vals/vals.max()
+        vals = (vals/vals.max()).fillna(0)
         residual = ((theo-vals)**2).sum()
         yield (residual, copy.deepcopy(out))
 
 def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False,
-                 heavy=False, isotope_offset=0, theo_dist=None):
+                 heavy=False, isotope_offset=0, theo_dist=None, label=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
     start_mz = start_mz/float(charge) if isotope_offset == 0 else (start_mz+isotope_offset*NEUTRON)/float(charge)
@@ -430,9 +587,22 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False,
     for index, isotope_index in enumerate(valid_keys):
         largest_loc = best_locations[index]
         micro_index = df.index.searchsorted(largest_loc)
-        micro_dict[isotope_index] = findMicro(df, micro_index, ppm=ppm)
+        micro_bounds = findMicro(df, micro_index, ppm=ppm)
+        # check the deviation of our checked peak from the identified peak
+        # this additional logic: micro_check
+        micro_ppm = abs(df.index[micro_index]-df.index[int(np.round(np.mean(micro_bounds)))])/df.index[micro_index]
+        # micro_y = df.iloc[micro_bounds[0]:micro_bounds[1]]
+        # micro_mean = np.average(range(*micro_bounds), weights=micro_y.values)
+        # print label, df.index[micro_index], df.iloc[micro_index]
+        # if abs(micro_mean-micro_index)<500:
+        micro_dict[isotope_index] = micro_bounds
         env_dict[isotope_index] = micro_index
-        ppm_dict[isotope_index] = 0#abs(abs(start-largest_loc)-offset)/largest_loc
+        ppm_dict[isotope_index] = micro_ppm
+        # else:
+        #     print 'micro failed', micro_index, micro_bounds, df.iloc[micro_bounds[0]:micro_bounds[1]], micro_mean
+        #     micro_dict[isotope_index] = None
+        #     env_dict[isotope_index] = None
+        #     ppm_dict[isotope_index] = 0
     return {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
 
 

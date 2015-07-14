@@ -47,7 +47,7 @@ RESULT_ORDER = [('peptide', 'Peptide'), ('modifications', 'Modifications'),
 
 parser = CustomParser(description=description)
 parser.add_processed_ms()
-parser.add_argument('--mzml', help="The mzML files for the raw data or directory containing them. Defaults to the directory of the processed file.", type=argparse.FileType('r'), nargs='?')
+parser.add_argument('--mzml', help="The mzML files for the raw data or directory containing them. Defaults to the directory of the processed file.", type=argparse.FileType('r'), nargs='*')
 parser.add_argument('--filemap', help="By default, the mzML file is assumed to be a derivation of the scan filename. " \
                                      "If this is not true, this file provides a correct mapping.")
 parser.add_argument('--rt-width', help="The width of the retention time window to search for. Default: 1.0 minute", type=float, default=1.0)
@@ -60,7 +60,7 @@ parser.add_argument('--skip', help="If true, skip scans with missing files in th
 parser.add_argument('--peptide', help="The peptide to limit quantification to.", type=str)
 parser.add_argument('--html', help="Output a HTML table summary.", action='store_true')
 parser.add_argument('--resume', help="Will resume from the last run. Only works if not directing output to stdout.", action='store_true')
-parser.add_argument('--sample', help="How much of the data to sample. Enter as a decimal (ie 1.0 for everything, 0.1 for 10%)", type=float, default=1.0)
+parser.add_argument('--sample', help="How much of the data to sample. Enter as a decimal (ie 1.0 for everything, 0.1 for 10%%)", type=float, default=1.0)
 parser.add_argument('-o', '--out', nargs='?', help='Stuff', type=str)
 
 import random
@@ -236,11 +236,11 @@ class Worker(Process):
                         if precursor_label in finished:
                             continue
                         precursor_mass = precursor+precursor_shift
-                        data[precursor_label]['precursor'] = precursor_mass
+                        data[precursor_label]['precursor'] = precursor_mass/float(charge)
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max if shift_max is not None else None
                         envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max,
-                                                      charge=charge, ppm=5, heavy=False, theo_dist=theo_dist)
+                                                      charge=charge, ppm=5, heavy=False, theo_dist=theo_dist, label=precursor_label)
                         peaks_found = data[precursor_label]['peaks']
                         # look for Proline/Glutamate/Glutamines
                         # if 'P' in peptide or 'E' in peptide or 'Q' in peptide:
@@ -280,7 +280,7 @@ class Worker(Process):
                 #             shared_isotopes = shared_isotopes.intersection(found_isotopes) if shared_isotopes else found_isotopes
                 for silac_label, silac_data in data.iteritems():
                     peaks_found = silac_data.get('peaks')
-                    peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window, start_rt=rt)
+                    peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window, start_rt=rt, silac_label=silac_label)
                     silac_data['df'] = peak_data.get('data')
 
                     if self.debug or self.html:
@@ -310,11 +310,11 @@ class Worker(Process):
                         label1_array = label1_data.get('df').fillna(0).sum(axis=1)
                         if not label1_array.empty:
                             array1_fit = peaks.fit_data(label1_array, charge=float(charge), peptide=peptide.upper())
-                            label1_int = array1_fit.get('fit').sum()
+                            #label1_int = array1_fit.get('fit').sum()
                             label1_res = array1_fit.get('residual')
                             label1_data['nb'] = array1_fit.get('fit')
                         else:
-                            label1_int = label1_array.sum()
+                            #label1_int = label1_array.sum()
                             label1_res = np.inf
                         #Chris_Ecoli_1-2-4_quant_ns2 -  pearson medium 0.71, heavy 0.92
                         #label1_int = label1_data['df'].fillna(0).sum(axis=1).sum()
@@ -377,15 +377,15 @@ class Worker(Process):
                                 label2_int = i2_data.sum()
                                 label2_res = np.inf
                         else:
-                            #label2_int = label2_data.get('intensity')
+                            label2_int = label2_data.get('intensity')
                             label2_array = label2_data.get('df').fillna(0).sum(axis=1)
                             if not label2_array.empty:
                                 array2_fit = peaks.fit_data(label2_array, charge=float(charge), peptide=peptide.upper())
-                                label2_int = array2_fit.get('fit').sum()
+                                #label2_int = array2_fit.get('fit').sum()
                                 label2_res = array2_fit.get('residual')
                                 label2_data['nb'] = array2_fit.get('fit')
                             else:
-                                label2_int = label2_array.sum()
+                                #label2_int = label2_array.sum()
                                 label2_res = np.inf
 
                         if self.mono and not label1_array.empty and not label2_array.empty:
@@ -470,22 +470,27 @@ def main():
     threads = args.p
     skip = args.skip
     out = args.out
-    hdf = args.mzml.name if args.mzml else args.mzml
+    hdf = args.mzml
     save_files = args.no_temp
     sparse = args.no_sparse
     html = args.html
     resume = args.resume
 
-
     hdf_filemap = {}
-    if not hdf:
-        hdf = os.path.abspath(os.path.split(source)[0])
-    if os.path.isdir(hdf):
-        hdf_filemap = dict([(os.path.splitext(i)[0], os.path.abspath(os.path.join(hdf, i))) for i in os.listdir(hdf) if i.lower().endswith('mzml')])
-    else:
-        hdf_filemap[os.path.splitext(os.path.split(hdf)[1])[0]] = os.path.abspath(hdf)
 
-    results = GuessIterator(source, full=True, store=False)
+    if isinstance(hdf, list):
+        nfunc = lambda i: (os.path.splitext(os.path.split(i.name)[1])[0], os.path.abspath(i.name)) if hasattr(i, 'name') else (os.path.splitext(os.path.split(i)[1])[0], os.path.abspath(i))
+        hdf_filemap = dict([nfunc(i) for i in hdf])
+    else:
+        hdf = hdf.name if hdf else hdf
+        if not hdf:
+            hdf = os.path.abspath(os.path.split(source)[0])
+        if os.path.isdir(hdf):
+            hdf_filemap = dict([(os.path.splitext(i)[0], os.path.abspath(os.path.join(hdf, i))) for i in os.listdir(hdf) if i.lower().endswith('mzml')])
+        else:
+            hdf_filemap[os.path.splitext(os.path.split(hdf)[1])[0]] = os.path.abspath(hdf)
+
+    results = GuessIterator(source, full=True, store=False, peptide=args.peptide)
 
     mass_scans = {}
     msf_scan_index = {}

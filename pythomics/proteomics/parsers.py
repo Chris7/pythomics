@@ -1045,7 +1045,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
         return None
 
 class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
-    def __init__(self, filename, clvl=3, srank=1, full=False, store=False):
+    def __init__(self, filename, clvl=3, srank=1, full=False, store=False, peptide=None):
         self.clvl = clvl
         self.full = full
         self.srank = srank
@@ -1094,24 +1094,279 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.mods = {}
         for i in self.cur.fetchall():
             self.mods[i[0]] = i[1:]
+        self.extra = 'and p.Sequence == "{}"'.format(peptide) if peptide is not None else ''
         try:
-            sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d'%(clvl,srank)
+            sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} and p.SearchEngineRank <= {} {}'.format(clvl,srank, self.extra)
             self.nrows = self.conn.execute(sql).fetchone()[0]
             #sql = 'select sp.spectrum,p.ConfidenceLevel,p.SearchEngineRank,p.Sequence,p.PeptideID,pp.ProteinID,p.SpectrumID from spectra sp left join peptides p on (p.SpectrumID=sp.UniqueSpectrumID) left join peptidesproteins pp on (p.PeptideID=pp.PeptideID) where p.PeptideID IS NOT NULL'
             if full:
-                sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID, sp.Spectrum from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d GROUP BY p.SpectrumID'%(clvl,srank)
+                sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID, sp.Spectrum from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} and p.SearchEngineRank <= {} {} GROUP BY p.SpectrumID'.format(clvl, srank, self.extra)
             else:
-                sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d and p.SearchEngineRank <= %d GROUP BY p.SpectrumID'%(clvl,srank)
+                sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} and p.SearchEngineRank <= {} {} GROUP BY p.SpectrumID'.format(clvl, srank, self.extra)
             self.cur.execute(sql)
         except sqlite3.OperationalError:
-            sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d'%clvl
+            sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} {}'.format(clvl, extra)
             self.nrows = self.conn.execute(sql).fetchone()[0]
             #sql = 'select sp.spectrum,p.ConfidenceLevel,p.ConfidenceLevel,p.Sequence,p.PeptideID,pp.ProteinID,p.SpectrumID from spectra sp left join peptides p on (p.SpectrumID=sp.UniqueSpectrumID) left join peptidesproteins pp on (p.PeptideID=pp.PeptideID) where p.PeptideID IS NOT NULL'
-            sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= %d GROUP BY p.SpectrumID'%clvl
+            sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} {} GROUP BY p.SpectrumID'.format(clvl, self.extra)
             self.cur.execute(sql)
         self.index = 0
         self.master_scans = {}
 
+    def getSILACLabels(self):
+        labels = {}
+        import HTMLParser
+        html_parser = HTMLParser.HTMLParser()
+        if self.version == 1:
+            sql = 'select ParameterValue from processingnodeparameters where ParameterName == "QuantificationMethod"'
+            self.cur.execute(sql)
+            for i in self.cur.fetchall():
+                xml = i[0]
+                silac = etree.fromstring(xml)
+        elif self.version == 2:
+            silac = etree.fromstring([i for i in self.root.iterdescendants('QuantitationMethod')][0].text.encode('utf-16'))
+        for method in silac.findall('*MethodPart'):
+            if self.version == 1 and method.getparent().get('name') != 'QuanChannels':
+                continue
+            method_label = method.attrib['name']
+            masses = {}
+            labels[method_label] = masses
+            for mod_info in [etree.fromstring(html_parser.unescape(i.text)) for i in method.iter('Parameter') if 'Modification Version' in i.text]:
+                for aa in mod_info.get('AminoAcids').split(','):
+                    try:
+                        masses[float(mod_info.get('DeltaMass'))].add(aa)
+                    except KeyError:
+                        masses[float(mod_info.get('DeltaMass'))] = set([aa])
+        return labels
+
+    def loadChromatogram(self):
+        sql = 'select * from chromatograms'
+        self.cur.execute(sql)
+        for chroma in self.cur.fetchall():
+            sInfo = chroma[2]
+            fp = StringIO.StringIO(sInfo)
+            zf = zipfile.ZipFile(fp, 'r')
+            for j in zf.namelist():
+                msInfo = zf.read(j)
+                xml = etree.fromstring(msInfo)
+                chromObj = Chromatogram()
+                chromObj.times, chromObj.intensities = zip(*[(float(point.attrib['T']), float(point.attrib['Y'])) for point in xml.findall('Points/*')])
+                if 'TicTrace' in j:
+                    self.chromatogram = chromObj
+                elif 'BasePeakTrace' in j:
+                    self.basetrace = chromObj
+            return self.chromatogram
+        else:
+            raise StopIteration
+
+    def getChromatogram(self):
+        try:
+            return self.chromatogram
+        except AttributeError:
+            self.loadChromatogram()
+        return self.chromatogram
+
+    def getBaseTrace(self):
+        try:
+            return self.basetrace
+        except AttributeError:
+            self.loadChromatogram()
+        return self.basetrace
+
+    def getScan(self, specId, peptide=None):
+        """
+        get a random scan
+        """
+        sql = "select sp.Spectrum, p.Sequence, p.PeptideID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) where sh.SpectrumID = %d and p.Sequence = '%s'"%(int(specId),peptide)
+        self.cur.execute(sql)
+        i = self.cur.fetchone()
+        if not i:
+            return None
+        scan = self.parseFullScan(i)
+        scan.spectrumId = specId
+        return scan
+
+    def getScans(self, modifications=True, fdr=True):
+        """
+        get a random scan
+        """
+        if fdr:
+            sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) WHERE p.ConfidenceLevel >= {} and p.SearchEngineRank <= {} {}".format(self.clvl, self.srank, self.extra)
+            try:
+                self.cur.execute(sql)
+            except sqlite3.OperationalError:
+                sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) WHERE p.ConfidenceLevel >= {} {}".format(self.clvl, self.extra)
+                self.cur.execute(sql)
+        else:
+            sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID)"
+            self.cur.execute(sql)
+        while True:
+            results = self.cur.fetchmany(1000)
+            if not results:
+                break
+            for tup in results:
+                scan = self.parseFullScan(tup, modifications=modifications)
+                scan.spectrumId = tup[3]
+                yield scan
+        yield None
+
+    def decompressScanInfo(self, scanObj, zip):
+        sInfo = zip
+        fp = StringIO.StringIO(sInfo)
+        zf = zipfile.ZipFile(fp, 'r')
+        for j in zf.namelist():
+            msInfo = zf.read(j)
+            msStr = msInfo.split('\n')
+            #sIO = StringIO.StringIO('\n'.join(msStr[1:]))
+            stage = 0
+            #this is dirty, but unfortunately the fastest method at the moment
+            # print msInfo
+            ms1_scans = []
+            for row in msStr:
+                if stage == 0:
+                    if 'FileID' in row:
+                        finfo = row.split('"')
+                        fileName = int(finfo[1])
+                        #msScanSum = finfo[5]
+                        fName = self.sFileMap[fileName]
+                        scanIndex = finfo.index(' ScanNumber=')+1
+                        sid = '%s.%s.%s'%(fName, finfo[scanIndex],finfo[scanIndex])
+                        #sid = '%s.%s.%s'%(fName, finfo[2],finfo[2])
+                        scanObj.file = fName
+                        scanObj.title = sid
+                        scanObj.id = sid
+                        scanObj.rt = float(finfo[7])
+                        scanObj.rawId = finfo[scanIndex]
+                        master_scan = finfo[5]
+                        stage=1
+                elif stage == 1:
+                    if 'PrecursorInfo' in row:
+                        finfo = row.split('"')
+                        charge = finfo[3]
+                        smass = finfo[5]
+                        scanObj.charge = charge
+                        scanObj.mass = float(smass)
+                        stage=2
+                elif stage == 2:
+                    if '<IsotopeClusterPeakCentroids>' in row:
+                        stage = 3
+                        scanObj.ms1_scans = []
+                elif stage == 3:
+                    if '<PeakCentroids>' in row:
+                        stage = 4
+                    elif '<Peak X' in row:
+                        finfo = row.split('"')
+                        ms1_scans.append((float(finfo[1]),float(finfo[3])))
+                elif stage == 4:
+                    #we just grab the ms/ms peaks at the moment
+                    if 'Peak X' in row:
+                        finfo = row.split('"')
+                        scanObj.scans.append((float(finfo[1]),float(finfo[3])))
+                    elif '</PeakCentroids>' in row:
+                        break
+        if msInfo:
+	    # print scanObj.scans
+            if master_scan != "-1" and ms1_scans:
+                master_scanobj = self.master_scans.get(master_scan, None)
+                if master_scanobj is None:
+                    master_scanobj = ScanObject()
+                    self.master_scans[master_scan] = master_scanobj
+                    master_scanobj.title = master_scan
+                    master_scanobj.ms_level = 1
+                    master_scanobj.rt = scanObj.rt
+                master_scanobj.scans += ms1_scans
+                master_scanobj.scans.sort(key=lambda x: x[0])
+                scanObj.ms1_scan = master_scanobj
+            return True
+        return False
+
+    def parseScan(self, i, modifications=True, full=False):
+#sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel = 1 and p.SearchEngineRank = 1 GROUP BY p.SpectrumID'
+        objs = []
+        self.index+=1
+        added = set([])#for some reason redundant scans appear
+        for confidence, searchRank, sequence, pepId in zip(i[0].split(','),i[1].split(','),i[2].split(','),i[3].split(',')):
+            if (sequence,pepId) in added:
+                continue
+            else:
+                added.add((sequence,pepId))
+            scanObj = PeptideObject()
+            try:
+                mods = self.mods[int(pepId)]
+                # print mods
+                for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
+                    modEntry = self.modTable[int(modId)]
+                    scanObj.addModification(sequence[int(modPosition)], modPosition, modEntry[1], modEntry[0])
+            except KeyError:
+                pass
+            scanObj.peptide = sequence
+            scanObj.rank = searchRank
+            scanObj.confidence = confidence
+            scanObj.acc = i[4]
+            scanObj.charge = i[6]
+            scanObj.rt = i[7]
+            fName = self.sFileMap[i[10]]
+            fScan = i[8]
+            lScan = i[9]
+            sid = '%s.%s.%s'%(fName, fScan,lScan)
+            scanObj.title = sid
+            scanObj.id = sid
+            scanObj.spectrumId=i[5]
+            scanObj.rawId = lScan
+            objs.append(scanObj)
+        return objs
+
+    def parseFullScan(self, i, modifications=True):
+        """
+        parses scan info for giving a Spectrum Obj for plotting. takes significantly longer since it has to unzip/parse xml
+        """
+        scanObj = PeptideObject()
+        peptide = str(i[1])
+        pid=i[2]
+        if modifications:
+            sql = 'select aam.ModificationName,pam.Position,aam.DeltaMass from peptidesaminoacidmodifications pam left join aminoacidmodifications aam on (aam.AminoAcidModificationID=pam.AminoAcidModificationID) where pam.PeptideID=%s'%pid
+            for row in self.conn.execute(sql):
+                scanObj.addModification(peptide[row[1]], str(row[1]), str(row[2]), row[0])
+        scanObj.peptide = peptide
+        if self.decompressScanInfo(scanObj, i[0]):
+            return scanObj
+        return None
+
+    def next(self):
+        if not self.scans:
+            i = self.cur.fetchone()
+            #we go by groups
+            if not i:
+                if self.master_scans:
+                    if isinstance(self.master_scans, dict):
+                        self.master_scans = self.master_scans.values()
+                    self.scans = self.master_scans
+                else:
+                    raise StopIteration
+            self.scans = self.parseScan(i, full=self.full)
+            if not self.scans:
+                if self.master_scans:
+                    if isinstance(self.master_scans, dict):
+                        self.master_scans = self.master_scans.values()
+                    self.scans = self.master_scans
+                else:
+                    raise StopIteration
+            else:
+                scan = self.scans.pop(0)
+        else:
+            scan = self.scans.pop(0)
+        return scan
+
+    def getProgress(self):
+        return self.index*100/self.nrows
+
+    def getPeptide(self, peptide=None):
+        sql = "select sp.Spectrum, p.Sequence, p.PeptideID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) where p.Sequence = '%s'"%(peptide)
+        self.cur.execute(sql)
+        for i in self.cur.fetchall():
+            yield self.parseFullScan(i)
+
+class MQIterator(templates.GenericIterator, GenericProteomicIterator):
     def getSILACLabels(self):
         labels = {}
         import HTMLParser
