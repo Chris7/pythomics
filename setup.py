@@ -14,5 +14,5 @@ setup(name='pythomics',
                'pythomics/scripts/incorporateGFF.py', 'pythomics/scripts/proteinInference.py',
                'pythomics/scripts/featureCollapser.py', 'pythomics/scripts/fastxTrimmer.py', 
                'pythomics/scripts/intersectFiles.py', 'pythomics/scripts/junctionalReads.py',
-               'pythomics/scripts/pyQuant.py'],
+               'pythomics/scripts/pyQuant.py', 'pythomics/scripts/ptmSummary.py'],
       zip_safe=False)
