@@ -23,10 +23,11 @@ def main():
     args = parser.parse_args()
     files = {'queries': args.fasta}
     nbci_url = 'http://www.ncbi.nlm.nih.gov/Structure/bwrpsb/bwrpsb.cgi?'
-    response = requests.post('{nbci}tdata=hits&dmode=all&db={database}'.format(nbci=nbci_url, database=args.db), files=files)
+    response = requests.post('{nbci}tdata=hits&dmode=std&db={database}&compbasedadj=0&filter=true&evalue=0.0001&cddefl=true'.format(nbci=nbci_url, database=args.db), files=files)
     if response.status_code != 200:
         sys.stderr.write('Error interfacing with NCBI: {}'.format(response.text))
         return 1
+    #sys.stderr.write('Submission response is {}\n'.format(response.text))
     header, search_id, _, status = response.text.split('\n')[:4]
     search_id = search_id.split('\t')[1]
     status_code = int(status.split('\t')[1])
@@ -36,13 +37,16 @@ def main():
             sys.stderr.write('Error interfacing with NCBI: {}'.format(response.text))
             return 1
         response = requests.get('{nbci}cdsid={job})'.format(nbci=nbci_url, job=search_id))
-        header, search_id, _, status = response.text.split('\n')[:4]
-        search_id = search_id.split('\t')[1]
-        status_code = int(status.split('\t')[1])
-        sys.stderr.write('Still running\n')
+        header, _, _, status = response.text.split('\n')[:4]
+        try:
+            status_code = int(status.split('\t')[1])
+        except:
+            sys.stderr.write('status fail with response\n{}\n'.format(response.text))
+            return 1
         if status_code != 0:
             if backoff < 60:
-                backoff = int(backoff*1.2)
+                backoff = int(float(backoff)*1.2+1.0)
+            sys.stderr.write('Still running, sleeping for {}\n'.format(backoff))
             time.sleep(backoff)
     with args.out as o:
         o.write(response.text)
