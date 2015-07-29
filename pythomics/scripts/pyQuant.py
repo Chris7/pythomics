@@ -202,9 +202,10 @@ class Worker(Process):
                     sys.stderr.write('on ms {0} {1} {2} {3}\n'.format(ms1, rt, precursor, scan_info))
                 precursors = {'Light': 0.0}
                 silac_dict = {'data': None, 'df': pd.DataFrame(), 'precursor': 'NA',
-                             'isotopes': {}, 'peaks': OrderedDict(), 'intensity': 'NA'}
+                              'isotopes': {}, 'peaks': OrderedDict(), 'intensity': 'NA'}
                 data = OrderedDict()
                 data['Light'] = copy.deepcopy(silac_dict)
+                combined_data = pd.DataFrame()
                 for silac_label, silac_masses in self.silac_labels.items():
                     silac_shift=0
                     for label_mass, label_masses in silac_masses.items():
@@ -220,12 +221,13 @@ class Worker(Process):
                 base_rt = rt_index_map.index.searchsorted(rt)
                 finished = set([])
                 result_dict = {'peptide': scan_info.get('mod_peptide', peptide),
-                              'scan': scanId, 'ms1': ms1,
-                              'charge': charge, 'modifications': mods}
+                               'scan': scanId, 'ms1': ms1,
+                               'charge': charge, 'modifications': mods}
                 rt_window = []
                 ms_index = 0
                 delta = -1
                 theo_dist = peaks.calculate_theoretical_distribution(peptide.upper())
+                spacing = config.NEUTRON/float(charge)
                 while True:
                     if len(finished) == len(precursors.keys()):
                         break
@@ -236,7 +238,8 @@ class Worker(Process):
                         if precursor_label in finished:
                             continue
                         precursor_mass = precursor+precursor_shift
-                        data[precursor_label]['precursor'] = precursor_mass/float(charge)
+                        precursor_mz = precursor_mass/float(charge)
+                        data[precursor_label]['precursor'] = precursor_mz
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max if shift_max is not None else None
                         envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max,
@@ -263,6 +266,14 @@ class Worker(Process):
                                         peaks_found[isotope][i] = [val_dict]
                                     except KeyError:
                                         peaks_found[isotope] = {i: [val_dict]}
+                        selected = {}
+                        for isotope, vals in envelope['micro_envelopes'].iteritems():
+                            selected[precursor_mz+isotope*spacing] = df.iloc[range(*vals)].sum()
+                        selected = pd.Series(selected, name=df.name).to_frame()
+                        if df.name in combined_data.columns:
+                            combined_data = combined_data.add(selected, axis='index', fill_value=0)
+                        else:
+                            combined_data = pd.concat([combined_data, selected], axis=1).fillna(0)
                     if found is False:
                         if delta == -1:
                             delta = 1
@@ -278,6 +289,8 @@ class Worker(Process):
                 #         found_isotopes = set(peaks_found.keys())
                 #         if found_isotopes:
                 #             shared_isotopes = shared_isotopes.intersection(found_isotopes) if shared_isotopes else found_isotopes
+                # combine all our peaks and get our RT boundaries. Do it this way fo ra
+                combined_data = combined_data.sort(axis='index').sort(axis='columns')
                 for silac_label, silac_data in data.iteritems():
                     peaks_found = silac_data.get('peaks')
                     peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window, start_rt=rt, silac_label=silac_label)
@@ -316,8 +329,8 @@ class Worker(Process):
                         else:
                             #label1_int = label1_array.sum()
                             label1_res = np.inf
-                        #Chris_Ecoli_1-2-4_quant_ns2 -  pearson medium 0.71, heavy 0.92
-                        #label1_int = label1_data['df'].fillna(0).sum(axis=1).sum()
+                            #Chris_Ecoli_1-2-4_quant_ns2 -  pearson medium 0.71, heavy 0.92
+                            #label1_int = label1_data['df'].fillna(0).sum(axis=1).sum()
                     for silac_label2 in data_keys:
                         if silac_label == silac_label2:
                             continue
@@ -418,7 +431,7 @@ class Worker(Process):
                                 x += [index,index,index]
                                 y += [0,val,0]
                             ax.bar(cseries.index, cseries.values, width=1.0/float(charge)/2,
-                                         color='{}'.format(color), alpha=0.7, label=silac_label)
+                                   color='{}'.format(color), alpha=0.7, label=silac_label)
                         x, y = [],[]
                         light_df = silac_data.get('df')
                         ax = plt.subplot(2, 1, 2)
@@ -450,7 +463,7 @@ class Worker(Process):
                     result_dict.update({
                         '{}_intensity'.format(silac_label): silac_data['intensity'],
                         '{}_precursor'.format(silac_label): silac_data['precursor']
-                   })
+                    })
                 # print result_dict
                 self.results.put(result_dict)
                 self.cleanScans(rt_index_map, rt)

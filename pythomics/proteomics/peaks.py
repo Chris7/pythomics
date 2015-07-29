@@ -472,7 +472,7 @@ def buildEnvelope(peaks_found=None, isotopes=None, gradient=False, rt_window=Non
     rt_data = df.fillna(0).sum(axis=0).sort_index()
     rt_data.index = rt_data.index.astype(float)
     int_val = integrate.trapz(rt_data.values, rt_data.index.values) if not rt_data.empty else 0
-    return {'data': df, 'integration': rt_data.fillna(0).sum(), 'rt': rt_data}
+    return {'data': df, 'integration': int_val, 'rt': rt_data}
 
 import copy
 def looper(selected=None, df=None, theo=None, index=0, out=None):
