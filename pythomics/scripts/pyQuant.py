@@ -265,7 +265,7 @@ class Worker(Process):
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max if shift_max is not None else None
                         envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max,
-                                                      charge=charge, ppm=5, heavy=False, theo_dist=theo_dist, label=precursor_label)
+                                                      charge=charge, ppm=5, heavy=True, theo_dist=theo_dist, label=precursor_label)
                         peaks_found = data[precursor_label]['peaks']
                         # look for Proline/Glutamate/Glutamines
                         # if 'P' in peptide or 'E' in peptide or 'Q' in peptide:
@@ -274,8 +274,7 @@ class Worker(Process):
                         #     print heavy
                         #     print heavy2
                         if not envelope['envelope']:
-                            if not peaks_found:
-                                finished.add(precursor_label)
+                            finished.add(precursor_label)
                             continue
                         found = True
                         for i in ['envelope', 'micro_envelopes', 'ppms']:
@@ -298,10 +297,12 @@ class Worker(Process):
                             combined_data = combined_data.add(selected, axis='index', fill_value=0)
                         else:
                             combined_data = pd.concat([combined_data, selected], axis=1).fillna(0)
+                        #print precursor_label, selected
                     if found is False:
                         if delta == -1:
                             delta = 1
-                            ms_index=1
+                            ms_index=0
+                            finished = set([])
                         elif ms_index >= 2:
                             break
                     ms_index += delta
