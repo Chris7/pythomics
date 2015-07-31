@@ -14,13 +14,15 @@ import sys
 import os
 import copy
 import operator
+from scipy.stats import mode
 import traceback
 import pandas as pd
 import numpy as np
 import re
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from itertools import izip_longest
 from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from multiprocessing import Process, Queue
 try:
     from profilestats import profile
@@ -134,6 +136,30 @@ class Worker(Process):
         #residuals = sum((fit-Y)**2)
         return residuals
 
+
+
+    def gauss(self, x, amp, mu, std):
+        return amp*np.exp(-(x - mu)**2/(2*std**2))
+
+    def gauss_ndim(self, xdata, *args):
+        amps, mus, sigmas = args[::3], args[1::3], args[2::3]
+        data = pd.Series(0, index=xdata)
+        for amp, mu, sigma in zip(amps, mus, sigmas):
+            data += pd.Series(self.gauss(xdata, amp, mu, sigma), index=xdata)
+        return data
+
+    def gauss_func(self, guess, *args):
+        xdata, ydata = args
+        data = self.gauss_ndim(xdata, *guess)
+        # absolute deviation as our distance metric. Empirically found to give better results than
+        # residual sum of squares for this data.
+        return sum(np.abs(ydata-data.values)**2)
+
+
+
+
+
+
     def run(self):
         import time
         args = parser.parse_args()
@@ -172,6 +198,8 @@ class Worker(Process):
         # @profile(print_stats=10, dump_stats=True)
         def run_thing(params):
             try:
+                import operator
+                from pythomics.proteomics import peaks, config
                 html_images = {}
                 start_time = time.time()
                 scan_info = params.get('scan_info')
@@ -228,6 +256,7 @@ class Worker(Process):
                 delta = -1
                 theo_dist = peaks.calculate_theoretical_distribution(peptide.upper())
                 spacing = config.NEUTRON/float(charge)
+                isotope_labels = {}
                 while True:
                     if len(finished) == len(precursors.keys()):
                         break
@@ -270,6 +299,8 @@ class Worker(Process):
                         for isotope, vals in envelope['micro_envelopes'].iteritems():
                             selected[precursor_mz+isotope*spacing] = df.iloc[range(*vals)].sum()
                         selected = pd.Series(selected, name=df.name).to_frame()
+                        for i in selected.index:
+                            isotope_labels[i] = precursor_label
                         if df.name in combined_data.columns:
                             combined_data = combined_data.add(selected, axis='index', fill_value=0)
                         else:
@@ -281,6 +312,10 @@ class Worker(Process):
                         elif ms_index >= 2:
                             break
                     ms_index += delta
+                # bookmark with zeros
+                combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[0])-1]] = 0
+                combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[-1])+1]] = 0
+                combined_data = combined_data[sorted(combined_data.columns)]
                 # shared_isotopes = set([])
                 rt_window.sort()
                 # if self.mono:
@@ -291,171 +326,237 @@ class Worker(Process):
                 #             shared_isotopes = shared_isotopes.intersection(found_isotopes) if shared_isotopes else found_isotopes
                 # combine all our peaks and get our RT boundaries. Do it this way fo ra
                 combined_data = combined_data.sort(axis='index').sort(axis='columns')
-                for silac_label, silac_data in data.iteritems():
-                    peaks_found = silac_data.get('peaks')
-                    peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window, start_rt=rt, silac_label=silac_label)
-                    silac_data['df'] = peak_data.get('data')
-
-                    if self.debug or self.html:
-                        if self.debug:
-                            pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
-                            plt.figure()
-                    light_rt_data = peak_data.get('rt')
-                    light_int = peak_data.get('integration')
-                    silac_data['intensity'] = light_int
-                    if self.debug or self.html:
-                        plt.figure()
-                        if not light_rt_data.empty:
-                            ax = light_rt_data.plot(color='b', title=str(light_int))
-                            if self.debug:
-                                pdf.savefig(figure=ax.get_figure())
-                            if self.html:
-                                fname = '{2}_{0}_{1}_{3}_{4}_rt.png'.format(peptide, ms1, self.filename, scanId, silac_label)
-                                ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
-                                html_images['{}_rt'.format(silac_label)] = os.path.join(self.html['rel'], fname)
-                data_keys = data.keys()
-                for silac_label in data_keys:
-                    label1_keys = set(data[silac_label]['peaks'].keys())
-                    label1_data = data[silac_label]
-                    if not self.mono:
-                        #Chris_Ecoli_1-2-4_quant_ns - pearson medium 0.82, heavy, 0.93
-                        label1_int = label1_data.get('intensity')
-                        label1_array = label1_data.get('df').fillna(0).sum(axis=1)
-                        if not label1_array.empty:
-                            array1_fit = peaks.fit_data(label1_array, charge=float(charge), peptide=peptide.upper())
-                            #label1_int = array1_fit.get('fit').sum()
-                            label1_res = array1_fit.get('residual')
-                            label1_data['nb'] = array1_fit.get('fit')
-                        else:
-                            #label1_int = label1_array.sum()
-                            label1_res = np.inf
-                            #Chris_Ecoli_1-2-4_quant_ns2 -  pearson medium 0.71, heavy 0.92
-                            #label1_int = label1_data['df'].fillna(0).sum(axis=1).sum()
-                    for silac_label2 in data_keys:
-                        if silac_label == silac_label2:
-                            continue
-                        label2_data = data[silac_label2]
-                        if self.mono:
-                            # compare the ratios of monoisotopic peaks
-                            shared_isotopes = label1_keys.intersection(set(label2_data['peaks'].keys()))
-                            if not shared_isotopes:
-                                continue
-                            # force the peak patterns to be in the same rough shape
-                            label1_diff = label1_data['df'].fillna(0).sum(axis=1).diff().fillna(0)
-                            label2_diff = label2_data['df'].fillna(0).sum(axis=1).diff().fillna(0)
-                            # si2 = set([])
-                            # # print label1_diff
-                            # # print label2_diff
-                            # # print shared_isotopes
-                            # for i in sorted(list(shared_isotopes)):
-                            #     if self.sign(label1_diff.iloc[i]) == self.sign(label2_diff.iloc[i]):
-                            #         si2.add(i)
-                            #     else:
-                            #         break
-                            # shared_isotopes = si2
-
-                            # This method is inferior
-                            # peaks_found = label1_data.get('peaks')
-                            # peak_data = peaks.buildEnvelope(peaks_found=peaks_found, isotopes=shared_isotopes,
-                            #                                 rt_window=rt_window)
-                            ##Chris_Ecoli_1-2-4_quant_wide3 pearson: medium 0.55, heavy 0.73
-                            # label1_int = peak_data.get('integration')
-                            ##Chris_Ecoli_1-2-4_quant_wide4 pearson: medium 0.72, heavy 0.96
-                            # label1_int = peak_data.get('rt').sum()
-                            ##Chris_Ecoli_1-2-4_quant_wide2 pearson: medium 0.72, heavy 0.96
-                            i1_data = label1_data['df'].fillna(0).sum(axis=1).iloc[list(shared_isotopes)]
-                            if not i1_data.empty:
-                                array1_fit = peaks.fit_data(i1_data , charge=float(charge), peptide=peptide.upper())
-                                label1_array = array1_fit.get('fit')
-                                label1_int = array1_fit.get('fit').sum()
-                                label1_res = array1_fit.get('residual')
-                                label1_data['nb'] = array1_fit.get('fit')
-                            else:
-                                label1_int = i1_data.sum()
-                                label1_res = np.inf
-
-                            # peaks_found = label2_data.get('peaks')
-                            # peak_data = peaks.buildEnvelope(peaks_found=peaks_found, isotopes=shared_isotopes,
-                            #                                 rt_window=rt_window)
-                            # label2_int = peak_data.get('integration')
-                            # label2_int = peak_data.get('rt').sum()
-                            i2_data = label2_data['df'].fillna(0).sum(axis=1).iloc[list(shared_isotopes)]
-                            if not i2_data.empty:
-                                array2_fit = peaks.fit_data(i2_data , charge=float(charge), peptide=peptide.upper())
-                                label2_array = array2_fit.get('fit')
-                                label2_int = array2_fit.get('fit').sum()
-                                label2_res = array2_fit.get('residual')
-                                label2_data['nb'] = array2_fit.get('fit')
-                            else:
-                                label2_int = i2_data.sum()
-                                label2_res = np.inf
-                        else:
-                            label2_int = label2_data.get('intensity')
-                            label2_array = label2_data.get('df').fillna(0).sum(axis=1)
-                            if not label2_array.empty:
-                                array2_fit = peaks.fit_data(label2_array, charge=float(charge), peptide=peptide.upper())
-                                #label2_int = array2_fit.get('fit').sum()
-                                label2_res = array2_fit.get('residual')
-                                label2_data['nb'] = array2_fit.get('fit')
-                            else:
-                                #label2_int = label2_array.sum()
-                                label2_res = np.inf
-
-                        if self.mono and not label1_array.empty and not label2_array.empty:
-                            # we want the intercept for the ratio
-                            slope, intercept, r_value, p_value, std_err = linregress(range(len(shared_isotopes)), label1_array.iloc[list(shared_isotopes)].values/label2_array.iloc[list(shared_isotopes)].values)
-                            result_dict.update({'{}_{}_ratio'.format(silac_label, silac_label2):
-                                                    intercept})
-                            result_dict.update({'{}_{}_residual'.format(silac_label, silac_label2):
-                                                    '{}'.format(abs(slope))})
-                        else:
-                            #return
-                            result_dict.update({'{}_{}_ratio'.format(silac_label, silac_label2):
-                                                    label1_int/label2_int if label1_int and label2_int else 'NA'})
-                            result_dict.update({'{}_{}_residual'.format(silac_label, silac_label2):
-                                                    '{}'.format(label1_res+label2_res)})
-
+                # for silac_label, silac_data in data.iteritems():
+                #     peaks_found = silac_data.get('peaks')
+                #     peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window, start_rt=rt, silac_label=silac_label)
+                #     silac_data['df'] = peak_data.get('data')
+                #
+                #     if self.debug or self.html:
+                #         if self.debug:
+                #             pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
+                #             plt.figure()
+                #     light_rt_data = peak_data.get('rt')
+                #     light_int = peak_data.get('integration')
+                #     silac_data['intensity'] = light_int
+                #     if self.debug or self.html:
+                #         plt.figure()
+                #         if not light_rt_data.empty:
+                #             ax = light_rt_data.plot(color='b', title=str(light_int))
+                #             if self.debug:
+                #                 pdf.savefig(figure=ax.get_figure())
+                #             if self.html:
+                #                 fname = '{2}_{0}_{1}_{3}_{4}_rt.png'.format(peptide, ms1, self.filename, scanId, silac_label)
+                #                 ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
+                #                 html_images['{}_rt'.format(silac_label)] = os.path.join(self.html['rel'], fname)
+                from scipy.signal import argrelmax, argrelmin
+                from scipy import integrate
+                from scipy.optimize import minimize
+                start_rt = rt_index_map.index[base_rt]
+                quant_vals = defaultdict(int)
+                isotope_labels = pd.Series(isotope_labels)
+                fig_map = {}
                 if self.html:
                     fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
-                    plt.figure()
-                    colors = ['blue', 'green', 'red', 'cyan', 'magenta', 'yellow']
-                    legends = []
-                    for silac_label, _ in precursors.iteritems():
-                        color = colors.pop(0) if colors else 'black'
-                        silac_data = data.get(silac_label)
-                        x, y = [],[]
-                        ax = plt.subplot(2, 1, 1)
-                        cseries = silac_data.get('nb')
-                        if cseries is not None:
-                            for index, val in zip(cseries.index, cseries):
-                                x += [index,index,index]
-                                y += [0,val,0]
-                            ax.bar(cseries.index, cseries.values, width=1.0/float(charge)/2,
-                                   color='{}'.format(color), alpha=0.7, label=silac_label)
-                        x, y = [],[]
-                        light_df = silac_data.get('df')
-                        ax = plt.subplot(2, 1, 2)
-                        cseries = light_df.fillna(0).sum(axis=1)
-                        for index, val in zip(cseries.index, cseries):
-                            x += [index,index,index]
-                            y += [0,val,0]
-                        line = ax.plot(x,y, '{}'.format(color), alpha=0.7)
-                        legends.append((line[0], silac_label))
+                    fig = plt.figure(figsize=(10,10))
+                    subplot_rows = len(precursors.keys())+1
+                    subplot_columns = pd.Series(isotope_labels).value_counts().iloc[0]+1
+                    subplot_count = int(len(combined_data)/4+1)
+                    ax = fig.add_subplot(subplot_rows, subplot_columns, 1, projection='3d')
+                    X=combined_data.columns.astype(float).values
+                    Y=combined_data.index.astype(float).values
+                    Z=combined_data.fillna(0).values
+                    # Z/=Z.max()
+                    Xi,Yi = np.meshgrid(X, Y)
+                    ax.plot_wireframe(Yi, Xi, Z, cmap=plt.cm.coolwarm)
 
-                    # Put a legend above our top plot
-                    # shift our plots down
-                    for i in xrange(1,3):
-                        ax = plt.subplot(2, 1, i)
-                        box = ax.get_position()
-                        # set_position is [left, bottom, width, height]
-                        ax.set_position([box.x0, box.y0 - box.height * 0.1,
-                                         box.width, box.height * 0.9])
-                    ax.get_figure().legend([i[0] for i in legends], [i[1] for i in legends], loc='upper center',
-                                           fancybox=True, shadow=True, ncol=3)
-                    ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
+                combined_peaks = defaultdict(dict)
+                plot_index = {}
+                quan_start = None
+                fig_nums = defaultdict(list)
+                for mz, label in isotope_labels.iteritems():
+                    fig_nums[label].append(mz)
+                labelx = False
+                labely = False
+                ymax = combined_data.max().max()
+                for row_num, (index, values) in enumerate(combined_data.iterrows()):
+                    quant_label = isotope_labels.iloc[isotope_labels.index.searchsorted(index)]
+                    if quan_start is None:
+                        labely = True
+                        fig_offset = subplot_columns+1
+                        quan_start = quant_label
+                    if quan_start != quant_label:
+                        labely = True
+                        if precursors.keys().index(quant_label) == len(precursors.keys())-1:
+                            labelx = True
+                        fig_offset += subplot_columns
+                        quan_start = quant_label
+                    fig_index = fig_offset+fig_nums[quant_label].index(index)+1
+                    # print quant_label, subplot_rows, subplot_columns, fig_index
+                    fig_map[index] = fig_index
+                    plot_index[index, quant_label] = row_num
+                    xdata = values.index.values.astype(float)
+                    ydata = values.fillna(0).values.astype(float)
+                    mval = ydata.max()
+                    ydata /= ydata.max()
+                    # order 1 is needed
+                    row_peaks = argrelmax(ydata, order=1)[0]
+                    if not row_peaks.any():
+                        row_peaks = [np.argmax(ydata)]
+                    minima = [i for i,v in enumerate(ydata) if v == 0]
+                    minima.extend([i for i in argrelmin(ydata, order=1)[0] if i not in minima])
+                    minima.sort()
+                    guess = []
+                    bnds = []
+                    last_peak = None
+                    for peak_num, peak_index in enumerate(row_peaks):
+                        next_peak = len(xdata) if peak_index == row_peaks[-1] else row_peaks[peak_num+1]
+                        peak_min, peak_max = xdata[peak_index]-0.2, xdata[peak_index]+0.2
+                        peak_min = xdata[0] if peak_min < xdata[0] else peak_min
+                        peak_max = xdata[-1] if peak_max > xdata[-1] else peak_max
+                        rel_peak = ydata[peak_index]/sum(ydata[row_peaks])
+                        bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, 0.2)])
+                        # find the points around it to estimate the std of the peak
+                        left = 0
+                        for i,v in enumerate(minima):
+                            if v >= peak_index:
+                                if i != 0:
+                                    left = minima[i-1]
+                                break
+                            left = v
+                        if last_peak is not None and left < last_peak:
+                            left = last_peak
+                        last_peak = peak_index
+                        right = len(xdata)
+                        for right in minima:
+                            if right > peak_index or right >= next_peak:
+                                if right < len(xdata) and right != next_peak:
+                                    right += 1
+                                break
+                        if right > next_peak:
+                            right = next_peak
+                        peak_values = ydata[left:right]
+                        peak_indices = xdata[left:right]
+                        if peak_values.any():
+                            average = np.average(peak_indices, weights=peak_values)
+                            variance = np.sqrt(np.average((peak_indices-average)**2, weights=peak_values))
+                            if variance == 0:
+                                # we have a singular peak if variance == 0, so set the variance to half of the x/y spacing
+                                if peak_index >= 1:
+                                    variance = xdata[peak_index]-xdata[peak_index-1]
+                                elif peak_index < len(xdata):
+                                    variance = xdata[peak_index+1]-xdata[peak_index]
+                                else:
+                                    # we have only 1 data point, most RT's fall into this width
+                                    variance = 0.05
+                        else:
+                            variance = 0.05
+                        if variance is not None:
+                            guess.extend([ydata[peak_index], xdata[peak_index], variance])
+                    if not guess:
+                        average = np.average(xdata, weights=ydata)
+                        variance = np.sqrt(np.average((xdata-average)**2, weights=ydata))
+                        if variance == 0:
+                            variance = 0.05
+                        guess = [max(ydata), np.argmax(ydata), variance]
+                    args = (xdata, ydata)
+                    opts = {}
+                    try:
+                        res = minimize(self.gauss_func, guess, args, method='SLSQP', bounds=bnds, options=opts)
+                    except:
+                        pass
+                    rt_means = res.x[1::3]
+                    rt_amps = res.x[::3]
+                    rt_vars = res.x[2::3]
+                    combined_peaks[quant_label][index] = [{'mean': i, 'amp': j*mval, 'var': k, 'peak': l}
+                                                          for i,j,k,l in zip(rt_means, rt_amps, rt_vars, xdata[row_peaks])]
+                    if self.html:
+                        ax = fig.add_subplot(subplot_rows, subplot_columns, fig_index)
+                        if labely:
+                            labely = False
+                        else:
+                            ax.set_yticklabels([])
+                        if not labelx:
+                            ax.set_xticklabels([])
+                        ax.plot(xdata, ydata*mval, 'bo-', alpha=0.7)
+                        ax.plot(xdata, self.gauss_ndim(xdata, *res.x)*mval, color='r')
+                try:
+                    common_peak = mode([peak['peak'] for i, values in combined_peaks.items() for index, peaks in values.iteritems() for peak in peaks])[0][0]
+                except:
+                    pass
+                common_loc = np.where(xdata==common_peak)[0][0]
+                for quant_label, quan_values in combined_peaks.items():
+                    for index, values in quan_values.items():
+                        row_num = plot_index[index, quant_label]
+                        if not values:
+                            continue
+                        closest_rts = sorted([(i, np.abs(i['peak']-common_peak)) for i in values], key=operator.itemgetter(1))[0][0]
+                        # if we move more than a ms1, ignore
+                        gc = 'k'
+                        peak_loc = np.where(xdata==closest_rts['peak'])[0][0]
+                        if len(xdata) >= 3 and np.abs(peak_loc-common_loc) > 1:
+                            gc = 'c'
+                        peak_params = (closest_rts['amp'], closest_rts['mean'], closest_rts['var'])
+                        # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
+                        # gauss beats simps/sumtraps/quadrature/fixed_quad
+                        int_val = integrate.quad(self.gauss, xdata[0], xdata[-1], args=peak_params)[0]
+                        if int(int_val) == 0 and quant_label == 'Light':
+                            pass
+                        quant_vals[quant_label] += int_val
+                    #     quant_vals[quant_label] += integrate.simps(ydata*mval, xdata)
+                        if self.html:
+                            ax = fig.add_subplot(subplot_rows, subplot_columns, fig_map.get(index))
+                            ax.plot(xdata, self.gauss(xdata, *peak_params), '{}o-'.format(gc), alpha=0.7)
+                            ax.set_ylim(0, ymax)
+
+                for silac_label1 in data.keys():
+                    qv1 = quant_vals.get(silac_label1)
+                    for silac_label2 in data.keys():
+                        if silac_label1 == silac_label2:
+                            continue
+                        qv2 = quant_vals.get(silac_label2)
+                        result_dict.update({'{}_{}_ratio'.format(silac_label1, silac_label2): qv1/qv2 if qv1 and qv2 else 'NA'})
+
+                if self.html:
+                    # colors = ['blue', 'green', 'red', 'cyan', 'magenta', 'yellow']
+                    # legends = []
+                    # for silac_label, _ in precursors.iteritems():
+                    #     color = colors.pop(0) if colors else 'black'
+                    #     silac_data = data.get(silac_label)
+                    #     x, y = [],[]
+                    #     ax = plt.subplot(2, 1, 1)
+                    #     cseries = silac_data.get('nb')
+                    #     if cseries is not None:
+                    #         for index, val in zip(cseries.index, cseries):
+                    #             x += [index,index,index]
+                    #             y += [0,val,0]
+                    #         ax.bar(cseries.index, cseries.values, width=1.0/float(charge)/2,
+                    #                color='{}'.format(color), alpha=0.7, label=silac_label)
+                    #     x, y = [],[]
+                    #     light_df = silac_data.get('df')
+                    #     ax = plt.subplot(2, 1, 2)
+                    #     cseries = light_df.fillna(0).sum(axis=1)
+                    #     for index, val in zip(cseries.index, cseries):
+                    #         x += [index,index,index]
+                    #         y += [0,val,0]
+                    #     line = ax.plot(x,y, '{}'.format(color), alpha=0.7)
+                    #     legends.append((line[0], silac_label))
+                    #
+                    # # Put a legend above our top plot
+                    # # shift our plots down
+                    # for i in xrange(1,3):
+                    #     ax = plt.subplot(2, 1, i)
+                    #     box = ax.get_position()
+                    #     # set_position is [left, bottom, width, height]
+                    #     ax.set_position([box.x0, box.y0 - box.height * 0.1,
+                    #                      box.width, box.height * 0.9])
+                    # ax.get_figure().legend([i[0] for i in legends], [i[1] for i in legends], loc='upper center',
+                    #                        fancybox=True, shadow=True, ncol=3)
+
+
+                    ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=100)
                     html_images['clusters'] = os.path.join(self.html['rel'], fname)
-                if self.debug:
-                    pdf.close()
+                # if self.debug:
+                #     pdf.close()
                 if self.debug or self.html:
                     plt.close('all')
                 result_dict.update({'html_info': html_images})
@@ -625,9 +726,9 @@ def main():
             for i,v in zip(l.split('\t'), headers):
                 rt_format = '{}_rt'.format(v.split(' ')[0])
                 if v.endswith('Intensity') and rt_format in images:
-                    out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images.get(rt_format), i))
+                    out.append("""<td data-toggle="popover" data-trigger="click" data-content='<img src="{0}">'>{1}</td>""".format(images.get(rt_format), i))
                 elif v == 'Peptide' and 'clusters' in images:
-                    out.append("""<td data-toggle="popover" data-trigger="hover click" data-content='<img src="{0}">'>{1}</td>""".format(images.get('clusters'), i))
+                    out.append("""<td data-toggle="popover" data-trigger="click" data-content='<img src="{0}">'>{1}</td>""".format(images.get('clusters'), i))
                 else:
                     out.append('<td>{0}</td>'.format(i))
             res += '\n'.join(out)+'</tr>'
@@ -788,6 +889,15 @@ def main():
                         		$('[data-toggle="popover"]').popover({ html : true, container: 'footer', placement: 'bottom' });
                         		reload = false;
                         	}
+                        });
+                        // from http://stackoverflow.com/questions/20466903/bootstrap-popover-hide-on-click-outside
+                        $(document).on('click', function (e) {
+                            $('[data-toggle=popover]').each(function () {
+                                // hide any open popovers when the anywhere else in the body is clicked
+                                if (!$(this).is(e.target) && $(this).has(e.target).length === 0 && $('.popover').has(e.target).length === 0) {
+                                    $(this).popover('hide');
+                                }
+                            });
                         });
                     });
                 </script>
