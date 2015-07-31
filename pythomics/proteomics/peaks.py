@@ -202,11 +202,19 @@ def findMicro(df, pos, ppm=None):
         We want to find the boundaries of our isotopic clusters. Basically we search until our gradient
         changes, this assumes it's roughly gaussian and there is little interference
     """
+    # find the edges within our tolerance
+    tolerance = ppm/1e6
     df_empty_index = df[df==0].index
     right = df_empty_index.searchsorted(df.index[pos])
     left = right-1
     left, right = (df.index.searchsorted(df_empty_index[left]),
             df.index.searchsorted(df_empty_index[right]))
+    left_bound, right_bound = (df.index.searchsorted(df.index[pos]-tolerance*df.index[pos]),
+                               df.index.searchsorted(df.index[pos]+tolerance*df.index[pos]))
+    if left < left_bound:
+        left = left_bound
+    if right > right_bound:
+        right = right_bound
     y = df.iloc[left:right]
    # if df.index[pos] > 620 and df.index[pos] < 621:
     #    print df.index[pos],y
