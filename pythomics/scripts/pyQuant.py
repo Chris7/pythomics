@@ -136,8 +136,6 @@ class Worker(Process):
         #residuals = sum((fit-Y)**2)
         return residuals
 
-
-
     def gauss(self, x, amp, mu, std):
         return amp*np.exp(-(x - mu)**2/(2*std**2))
 
@@ -154,11 +152,6 @@ class Worker(Process):
         # absolute deviation as our distance metric. Empirically found to give better results than
         # residual sum of squares for this data.
         return sum(np.abs(ydata-data.values)**2)
-
-
-
-
-
 
     def run(self):
         import time
@@ -297,7 +290,7 @@ class Worker(Process):
                                         peaks_found[isotope] = {i: [val_dict]}
                         selected = {}
                         for isotope, vals in envelope['micro_envelopes'].iteritems():
-                            selected[precursor_mz+isotope*spacing] = df.iloc[range(*vals)].sum()
+                            selected[precursor_mz+isotope*spacing] = vals#df.iloc[range(*vals)].sum()
                         selected = pd.Series(selected, name=df.name).to_frame()
                         for i in selected.index:
                             isotope_labels[i] = precursor_label
@@ -394,81 +387,15 @@ class Worker(Process):
                     # print quant_label, subplot_rows, subplot_columns, fig_index
                     fig_map[index] = fig_index
                     plot_index[index, quant_label] = row_num
+                    res, all_peaks = peaks.findAllPeaks(values)
                     xdata = values.index.values.astype(float)
-                    ydata = values.fillna(0).values.astype(float)
+                    ydata = values.fillna(0).values
                     mval = ydata.max()
-                    ydata /= ydata.max()
-                    # order 1 is needed
-                    row_peaks = argrelmax(ydata, order=1)[0]
-                    if not row_peaks.any():
-                        row_peaks = [np.argmax(ydata)]
-                    minima = [i for i,v in enumerate(ydata) if v == 0]
-                    minima.extend([i for i in argrelmin(ydata, order=1)[0] if i not in minima])
-                    minima.sort()
-                    guess = []
-                    bnds = []
-                    last_peak = None
-                    for peak_num, peak_index in enumerate(row_peaks):
-                        next_peak = len(xdata) if peak_index == row_peaks[-1] else row_peaks[peak_num+1]
-                        peak_min, peak_max = xdata[peak_index]-0.2, xdata[peak_index]+0.2
-                        peak_min = xdata[0] if peak_min < xdata[0] else peak_min
-                        peak_max = xdata[-1] if peak_max > xdata[-1] else peak_max
-                        rel_peak = ydata[peak_index]/sum(ydata[row_peaks])
-                        bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, 0.2)])
-                        # find the points around it to estimate the std of the peak
-                        left = 0
-                        for i,v in enumerate(minima):
-                            if v >= peak_index:
-                                if i != 0:
-                                    left = minima[i-1]
-                                break
-                            left = v
-                        if last_peak is not None and left < last_peak:
-                            left = last_peak
-                        last_peak = peak_index
-                        right = len(xdata)
-                        for right in minima:
-                            if right > peak_index or right >= next_peak:
-                                if right < len(xdata) and right != next_peak:
-                                    right += 1
-                                break
-                        if right > next_peak:
-                            right = next_peak
-                        peak_values = ydata[left:right]
-                        peak_indices = xdata[left:right]
-                        if peak_values.any():
-                            average = np.average(peak_indices, weights=peak_values)
-                            variance = np.sqrt(np.average((peak_indices-average)**2, weights=peak_values))
-                            if variance == 0:
-                                # we have a singular peak if variance == 0, so set the variance to half of the x/y spacing
-                                if peak_index >= 1:
-                                    variance = xdata[peak_index]-xdata[peak_index-1]
-                                elif peak_index < len(xdata):
-                                    variance = xdata[peak_index+1]-xdata[peak_index]
-                                else:
-                                    # we have only 1 data point, most RT's fall into this width
-                                    variance = 0.05
-                        else:
-                            variance = 0.05
-                        if variance is not None:
-                            guess.extend([ydata[peak_index], xdata[peak_index], variance])
-                    if not guess:
-                        average = np.average(xdata, weights=ydata)
-                        variance = np.sqrt(np.average((xdata-average)**2, weights=ydata))
-                        if variance == 0:
-                            variance = 0.05
-                        guess = [max(ydata), np.argmax(ydata), variance]
-                    args = (xdata, ydata)
-                    opts = {}
-                    try:
-                        res = minimize(self.gauss_func, guess, args, method='SLSQP', bounds=bnds, options=opts)
-                    except:
-                        pass
                     rt_means = res.x[1::3]
                     rt_amps = res.x[::3]
                     rt_vars = res.x[2::3]
                     combined_peaks[quant_label][index] = [{'mean': i, 'amp': j*mval, 'var': k, 'peak': l}
-                                                          for i,j,k,l in zip(rt_means, rt_amps, rt_vars, xdata[row_peaks])]
+                                                          for i,j,k,l in zip(rt_means, rt_amps, rt_vars, all_peaks)]
                     if self.html:
                         ax = fig.add_subplot(subplot_rows, subplot_columns, fig_index)
                         if labely:
@@ -499,9 +426,10 @@ class Worker(Process):
                         # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
                         # gauss beats simps/sumtraps/quadrature/fixed_quad
                         int_val = integrate.quad(self.gauss, xdata[0], xdata[-1], args=peak_params)[0]
-                        if int(int_val) == 0 and quant_label == 'Light':
-                            pass
-                        quant_vals[quant_label] += int_val
+                        #if int_val == np.nan or int(int_val) == 0 and quant_label == 'Light':
+                         #   pass
+                        if int_val and not pd.isnull(int_val):
+                            quant_vals[quant_label] += int_val
                     #     quant_vals[quant_label] += integrate.simps(ydata*mval, xdata)
                         if self.html:
                             ax = fig.add_subplot(subplot_rows, subplot_columns, fig_map.get(index))

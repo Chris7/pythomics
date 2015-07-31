@@ -203,32 +203,125 @@ def findMicro(df, pos, ppm=None):
         changes, this assumes it's roughly gaussian and there is little interference
     """
     # find the edges within our tolerance
-    tolerance = ppm/1e6
+    tolerance = ppm/1e6*2
     df_empty_index = df[df==0].index
     right = df_empty_index.searchsorted(df.index[pos])
     left = right-1
     left, right = (df.index.searchsorted(df_empty_index[left]),
             df.index.searchsorted(df_empty_index[right]))
-    left_bound, right_bound = (df.index.searchsorted(df.index[pos]-tolerance*df.index[pos]),
-                               df.index.searchsorted(df.index[pos]+tolerance*df.index[pos]))
-    if left < left_bound:
-        left = left_bound
-    if right > right_bound:
-        right = right_bound
     y = df.iloc[left:right]
+    #if df.index[pos] > 644.3355 and df.index[pos] < 644.3356:
+     #   pass
+    #print y
+    #y.index = range(len(y))
+    peaks, peak_centers = findAllPeaks(y)
    # if df.index[pos] > 620 and df.index[pos] < 621:
     #    print df.index[pos],y
     # new logic is nm
-    maximas = y.iloc[argrelmax(y.fillna(0).values, order=2)[0]]
-    # check for peaks outside our window
-    if len(maximas) > 1:
-        start_pos = y.index.searchsorted(df.index[pos])
-        left, right = findPeak(y, start_pos)
-        left = df.index.searchsorted(y.index[left])
-        if right == len(y):
-            right = len(y)-1
-        right = df.index.searchsorted(y.index[right])
-    return left, right
+    sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs((v-df.index[pos])/df.index[pos])) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
+    sorted_peaks = filter(lambda x: x[1]<tolerance, sorted_peaks)
+    if not sorted_peaks:
+        return 0
+    peak = sorted_peaks[0][0]
+    # interpolate our mean/std to a linear range
+    from scipy.interpolate import interp1d
+    mapper = interp1d(y.index, range(len(y)))
+    mu = mapper(peak[1])
+    std = mapper(y.index[0]+peak[2])-mapper(y.index[0])
+    peak_gauss = (peak[0]*y.max(), mu, std)
+    return integrate.quad(gauss, -np.inf, np.inf, args=peak_gauss)[0]
+
+def gauss(x, amp, mu, std):
+    return amp*np.exp(-(x - mu)**2/(2*std**2))
+
+def gauss_ndim( xdata, *args):
+    amps, mus, sigmas = args[::3], args[1::3], args[2::3]
+    data = pd.Series(0, index=xdata)
+    for amp, mu, sigma in zip(amps, mus, sigmas):
+        data += pd.Series(gauss(xdata, amp, mu, sigma), index=xdata)
+    return data
+
+def gauss_func( guess, *args):
+    xdata, ydata = args
+    data = gauss_ndim(xdata, *guess)
+    # absolute deviation as our distance metric. Empirically found to give better results than
+    # residual sum of squares for this data.
+    return sum(np.abs(ydata-data.values)**2)
+
+def findAllPeaks(values):
+    xdata = values.index.values.astype(float)
+    ydata = values.fillna(0).values.astype(float)
+    mval = ydata.max()
+    ydata /= ydata.max()
+    # order 1 is needed
+    row_peaks = argrelmax(ydata, order=1)[0]
+    if not row_peaks.any():
+        row_peaks = [np.argmax(ydata)]
+    minima = [i for i,v in enumerate(ydata) if v == 0]
+    minima.extend([i for i in argrelmin(ydata, order=1)[0] if i not in minima])
+    minima.sort()
+    guess = []
+    bnds = []
+    last_peak = None
+    for peak_num, peak_index in enumerate(row_peaks):
+        next_peak = len(xdata) if peak_index == row_peaks[-1] else row_peaks[peak_num+1]
+        peak_min, peak_max = xdata[peak_index]-0.2, xdata[peak_index]+0.2
+        peak_min = xdata[0] if peak_min < xdata[0] else peak_min
+        peak_max = xdata[-1] if peak_max > xdata[-1] else peak_max
+        rel_peak = ydata[peak_index]/sum(ydata[row_peaks])
+        bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, 0.2)])
+        # find the points around it to estimate the std of the peak
+        left = 0
+        for i,v in enumerate(minima):
+            if v >= peak_index:
+                if i != 0:
+                    left = minima[i-1]
+                break
+            left = v
+        if last_peak is not None and left < last_peak:
+            left = last_peak
+        last_peak = peak_index
+        right = len(xdata)
+        for right in minima:
+            if right > peak_index or right >= next_peak:
+                if right < len(xdata) and right != next_peak:
+                    right += 1
+                break
+        if right > next_peak:
+            right = next_peak
+        if right < peak_index:
+            right = next_peak
+        peak_values = ydata[left:right]
+        peak_indices = xdata[left:right]
+        if peak_values.any():
+            average = np.average(peak_indices, weights=peak_values)
+            variance = np.sqrt(np.average((peak_indices-average)**2, weights=peak_values))
+            if variance == 0:
+                # we have a singular peak if variance == 0, so set the variance to half of the x/y spacing
+                if peak_index >= 1:
+                    variance = xdata[peak_index]-xdata[peak_index-1]
+                elif peak_index < len(xdata):
+                    variance = xdata[peak_index+1]-xdata[peak_index]
+                else:
+                    # we have only 1 data point, most RT's fall into this width
+                    variance = 0.05
+        else:
+            variance = 0.05
+        if variance is not None:
+            guess.extend([ydata[peak_index], xdata[peak_index], variance])
+    if not guess:
+        average = np.average(xdata, weights=ydata)
+        variance = np.sqrt(np.average((xdata-average)**2, weights=ydata))
+        if variance == 0:
+            variance = 0.05
+        guess = [max(ydata), np.argmax(ydata), variance]
+    args = (xdata, ydata)
+    opts = {}
+    try:
+        res = optimize.minimize(gauss_func, guess, args, method='SLSQP', bounds=bnds, options=opts)
+    except:
+        pass
+    return res, xdata[row_peaks]
 
 def merge_list(starting_list):
     final_list = []
@@ -598,14 +691,14 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False,
         micro_bounds = findMicro(df, micro_index, ppm=ppm)
         # check the deviation of our checked peak from the identified peak
         # this additional logic: micro_check
-        micro_ppm = abs(df.index[micro_index]-df.index[int(np.round(np.mean(micro_bounds)))])/df.index[micro_index]
+        #micro_ppm = abs(df.index[micro_index]-df.index[int(np.round(np.mean(micro_bounds)))])/df.index[micro_index]
         # micro_y = df.iloc[micro_bounds[0]:micro_bounds[1]]
         # micro_mean = np.average(range(*micro_bounds), weights=micro_y.values)
         # print label, df.index[micro_index], df.iloc[micro_index]
         # if abs(micro_mean-micro_index)<500:
         micro_dict[isotope_index] = micro_bounds
         env_dict[isotope_index] = micro_index
-        ppm_dict[isotope_index] = micro_ppm
+        ppm_dict[isotope_index] = 0#micro_ppm
         # else:
         #     print 'micro failed', micro_index, micro_bounds, df.iloc[micro_bounds[0]:micro_bounds[1]], micro_mean
         #     micro_dict[isotope_index] = None
