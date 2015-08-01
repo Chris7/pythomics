@@ -407,10 +407,10 @@ class Worker(Process):
                             ax.set_xticklabels([])
                         ax.plot(xdata, ydata*mval, 'bo-', alpha=0.7)
                         ax.plot(xdata, self.gauss_ndim(xdata, *res.x)*mval, color='r')
-                try:
-                    common_peak = mode([peak['peak'] for i, values in combined_peaks.items() for index, peaks in values.iteritems() for peak in peaks])[0][0]
-                except:
-                    pass
+                # get two most common peak, pick the closest to our RT
+                common_peak = mode([peak['peak'] for i, values in combined_peaks.items() for index, peaks in values.iteritems() for peak in peaks])[0][0]
+                common_peak2 = mode([peak['peak'] for i, values in combined_peaks.items() for index, peaks in values.iteritems() for peak in peaks if peak['peak'] != common_peak])[0][0]
+                common_peak = sorted([(i, np.abs(start_rt-i)) for i in [common_peak, common_peak2]], key=operator.itemgetter(1))[0][0]
                 common_loc = np.where(xdata==common_peak)[0][0]
                 for quant_label, quan_values in combined_peaks.items():
                     for index, values in quan_values.items():
