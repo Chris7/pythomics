@@ -306,9 +306,9 @@ class Worker(Process):
                         elif ms_index >= 2:
                             break
                     ms_index += delta
-                # bookmark with zeros
-                combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[0])-1]] = 0
+                # bookmark with zeros, do the right end first because pandas will by default append there
                 combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[-1])+1]] = 0
+                combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[0])-1]] = 0
                 combined_data = combined_data[sorted(combined_data.columns)]
                 # shared_isotopes = set([])
                 rt_window.sort()
