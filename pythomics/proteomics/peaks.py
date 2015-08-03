@@ -209,6 +209,7 @@ def findMicro(df, pos, ppm=None):
     left = right-1
     left, right = (df.index.searchsorted(df_empty_index[left]),
             df.index.searchsorted(df_empty_index[right]))
+    right += 1
     y = df.iloc[left:right]
     #if df.index[pos] > 644.3355 and df.index[pos] < 644.3356:
      #   pass
@@ -221,15 +222,24 @@ def findMicro(df, pos, ppm=None):
     sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs((v-df.index[pos])/df.index[pos])) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
     sorted_peaks = filter(lambda x: x[1]<tolerance, sorted_peaks)
     if not sorted_peaks:
-        return 0
+        return {'int': 0}
     peak = sorted_peaks[0][0]
     # interpolate our mean/std to a linear range
     from scipy.interpolate import interp1d
     mapper = interp1d(y.index, range(len(y)))
-    mu = mapper(peak[1])
-    std = mapper(y.index[0]+peak[2])-mapper(y.index[0])
+    try:
+        mu = mapper(peak[1])
+    except:
+        print 'mu', peak, y.index
+        return {'int': 0}
+    try:
+        std = mapper(y.index[0]+np.abs(peak[2]))-mapper(y.index[0])
+    except:
+        print 'std', peak, y.index
+        return {'int': 0}
     peak_gauss = (peak[0]*y.max(), mu, std)
-    return integrate.quad(gauss, -np.inf, np.inf, args=peak_gauss)[0]
+    peak[0] *= y.max()
+    return {'int': integrate.quad(gauss, -np.inf, np.inf, args=peak_gauss)[0], 'bounds': (left, right), 'params': peak}
 
 def gauss(x, amp, mu, std):
     return amp*np.exp(-(x - mu)**2/(2*std**2))

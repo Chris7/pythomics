@@ -91,6 +91,7 @@ class Worker(Process):
 
     def getScan(self, ms1, dense=True):
         import numpy as np
+        ms1 = int(ms1)
         if ms1 not in self.data:
             scan = self.raw.getScan(ms1)
             scan_vals = np.array(scan.scans)
@@ -98,10 +99,10 @@ class Worker(Process):
             # due to precision, we have multiple m/z values at the same place. We can eliminate this by grouping them and summing them.
             # Summation is the correct choice here because we are combining values of a precision higher than we care about.
             res = res.groupby(level=0).sum()
-            if self.sparse:
-                res = res.to_sparse(fill_value=0)
+            #if self.sparse:
+             #   res = res.to_sparse(fill_value=0)
             self.data[ms1] = res
-        return self.data[ms1].to_dense() if dense else self.data[ms1]
+        return self.data[ms1]#.to_dense() if dense else self.data[ms1]
 
     @staticmethod
     def sign(a):
@@ -250,6 +251,7 @@ class Worker(Process):
                 theo_dist = peaks.calculate_theoretical_distribution(peptide.upper())
                 spacing = config.NEUTRON/float(charge)
                 isotope_labels = {}
+                chosen_window = defaultdict(dict)
                 while True:
                     if len(finished) == len(precursors.keys()):
                         break
@@ -289,7 +291,8 @@ class Worker(Process):
                                         peaks_found[isotope] = {i: [val_dict]}
                         selected = {}
                         for isotope, vals in envelope['micro_envelopes'].iteritems():
-                            selected[precursor_mz+isotope*spacing] = vals#df.iloc[range(*vals)].sum()
+                            selected[precursor_mz+isotope*spacing] = vals.get('int')#df.iloc[range(*vals)].sum()
+                            chosen_window[df.name][precursor_mz+isotope*spacing] = vals
                         selected = pd.Series(selected, name=df.name).to_frame()
                         for i in selected.index:
                             isotope_labels[i] = precursor_label
@@ -349,6 +352,8 @@ class Worker(Process):
                 quant_vals = defaultdict(int)
                 isotope_labels = pd.Series(isotope_labels)
                 fig_map = {}
+                if ms1 == 1674:
+                    pass
                 if self.html:
                     fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
                     fig = plt.figure(figsize=(10,10))
@@ -405,11 +410,11 @@ class Worker(Process):
                             ax.set_yticklabels([])
                         if not labelx:
                             ax.set_xticklabels([])
-                        ax.plot(xdata, ydata*mval, 'bo-', alpha=0.7)
+                        ax.plot(xdata, ydata, 'bo-', alpha=0.7)
                         ax.plot(xdata, self.gauss_ndim(xdata, *res.x)*mval, color='r')
                 # get two most common peak, pick the closest to our RT
                 # we may need to add a check for a minimal # of in for max distance from the RT as well here.
-                common_peaks = pd.Series([peak['peak'] for i, values in combined_peaks.items() for index, peaks in values.iteritems() for peak in peaks]).value_counts()
+                common_peaks = pd.Series([peak['peak'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks]).value_counts()
                 tcommon_peaks = common_peaks[common_peaks>=4]
                 if tcommon_peaks.any():
                     common_peaks = tcommon_peaks if tcommon_peaks.any() else common_peaks
@@ -427,21 +432,33 @@ class Worker(Process):
                         # if we move more than a ms1, ignore
                         gc = 'k'
                         peak_loc = np.where(xdata==closest_rts['peak'])[0][0]
-                        if len(xdata) >= 3 and np.abs(peak_loc-common_loc) > 1:
+                        if len(xdata) >= 3 and np.abs(peak_loc-common_loc) > 2:
                             gc = 'c'
                         peak_params = (closest_rts['amp'], closest_rts['mean'], closest_rts['var'])
                         # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
                         # gauss beats simps/sumtraps/quadrature/fixed_quad
+                        left_rt, right_rt = peak_params[1]-2.5*np.abs(peak_params[2]),peak_params[1]+2.5*np.abs(peak_params[2])
                         int_val = integrate.quad(self.gauss, xdata[0], xdata[-1], args=peak_params)[0]
+                        # for micro_rt, micro_info in chosen_window.items():
+                        #     if not (left_rt <= micro_rt <= right_rt):
+                        #         continue
+                        #     for micro_index, d in micro_info.items():
+                        #         if d['int'] and micro_index == index:
+                        #             micro_df = self.getScan(rt_index_map[micro_rt])
+                        #             left, right = d.get('bounds')
+                        #             micro_peak = d.get('params')
+                        #             y = micro_df.iloc[left:right]
+                        #             micro_df.iloc[left:right] -= peaks.gauss(y.index.values, *micro_peak)
+                        #             micro_df.iloc[left:right][micro_df.iloc[left:right]<0] = 0
                         #if int_val == np.nan or int(int_val) == 0 and quant_label == 'Light':
                          #   pass
-                        if int_val and not pd.isnull(int_val):
+                        if int_val and not pd.isnull(int_val) and gc == 'k':
                             quant_vals[quant_label] += int_val
                     #     quant_vals[quant_label] += integrate.simps(ydata*mval, xdata)
                         if self.html:
                             ax = fig.add_subplot(subplot_rows, subplot_columns, fig_map.get(index))
                             ax.plot(xdata, self.gauss(xdata, *peak_params), '{}o-'.format(gc), alpha=0.7)
-                            ax.set_ylim(0, ymax)
+                            ax.set_ylim(0, peak_params[0])
 
                 for silac_label1 in data.keys():
                     qv1 = quant_vals.get(silac_label1)
