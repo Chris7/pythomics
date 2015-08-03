@@ -438,8 +438,9 @@ class Worker(Process):
                         peak_loc = np.where(xdata == closest_rts['peak'])[0][0]
                         mean = closest_rts['mean']
                         amp = closest_rts['amp']
-                        mean_diff = (mean-xdata[common_loc])/(xdata[1]-xdata[0])
-                        if len(xdata) >= 3 and (np.abs(peak_loc-common_loc) > 2 or mean_diff > 2):
+                        mean_diff = mean-xdata[common_loc]
+                        if len(xdata) >= 3 and (np.abs(peak_loc-common_loc) > 2 or mean_diff > 0.3):
+                            print quant_label, index, np.abs(peak_loc-common_loc), mean_diff
                             mean = common_peak
                             amp = ydata[common_peak]
                             gc = 'g'
