@@ -394,6 +394,8 @@ class Worker(Process):
                     fig_map[index] = fig_index
                     plot_index[index, quant_label] = row_num
                     res, all_peaks = peaks.findAllPeaks(values)
+                    if quant_label == 'Medium':
+                        pass
                     xdata = values.index.values.astype(float)
                     ydata = values.fillna(0).values
                     mval = ydata.max()
@@ -417,7 +419,7 @@ class Worker(Process):
                 # we may need to add a check for a minimal # of in for max distance from the RT as well here.
                 common_peaks = pd.Series([peak['peak'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks]).value_counts()
                 common_peaks = common_peaks.sort_index()
-                tcommon_peaks = common_peaks[common_peaks>=3]
+                tcommon_peaks = common_peaks[common_peaks>=4]
 
                 # combine peaks that are separated by a single scan
                 spillover = {}
@@ -433,14 +435,10 @@ class Worker(Process):
                 new_common = pd.Series(0, index=spillover.keys())
                 for i,v in spillover.iteritems():
                     new_common[i] += sum([tcommon_peaks[val] for val in v])
-                tcommon_peaks = new_common
 
-                if tcommon_peaks.any():
-                    common_peaks = tcommon_peaks if tcommon_peaks.any() else common_peaks
-                    common_peaks_deltas = sorted([(i, np.abs(i-start_rt)) for i in common_peaks.index], key=operator.itemgetter(1))
-                    common_peak = common_peaks_deltas[0][0]
-                else:
-                    common_peak = common_peaks.index[0]
+                common_peaks = new_common if new_common.any() else common_peaks
+                common_peaks_deltas = sorted([(i, np.abs(i-start_rt)) for i in common_peaks.index], key=operator.itemgetter(1))
+                common_peak = common_peaks_deltas[0][0]
                 common_loc = np.where(xdata==common_peak)[0][0]
                 common_var = pd.Series([peak['var'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks if peak['peak'] == common_peak]).median()
                 for quant_label, quan_values in combined_peaks.items():
@@ -456,19 +454,20 @@ class Worker(Process):
                         peak_loc = np.where(xdata == closest_rts['peak'])[0][0]
                         mean = closest_rts['mean']
                         amp = closest_rts['amp']
-                        mean_diff = mean-xdata[common_loc]
+                        mean_diff = np.abs(mean-xdata[common_loc])
                         if len(xdata) >= 3 and (np.abs(peak_loc-common_loc) > 2 or mean_diff > 0.3):
                             mean = common_peak
                             amp = ydata[common_peak]
                             gc = 'g'
-                        var = common_var if closest_rts['var']/common_var > 2 else closest_rts['var']
+                        var_rat = closest_rts['var']/common_var
+                        var = common_var if (var_rat > 2 or var_rat < 0.5) else closest_rts['var']
                         peak_params = (amp,  mean, var)
                         # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
                         # gauss beats simps/sumtraps/quadrature/fixed_quad
-                        left_rt, right_rt = peak_params[1]-2.5*np.abs(peak_params[2]),peak_params[1]+2.5*np.abs(peak_params[2])
                         int_val = integrate.quad(self.gauss, xdata[0], xdata[-1], args=peak_params)[0]
                         # This interferes with cases where we quantify the heavy version of a peptide by searching for its peak
                         # and that peptide later appears as a fragment ion.
+                        # left_rt, right_rt = peak_params[1]-2.5*np.abs(peak_params[2]),peak_params[1]+2.5*np.abs(peak_params[2])
                         # for micro_rt, micro_info in chosen_window.items():
                         #     if not (left_rt <= micro_rt <= right_rt):
                         #         continue

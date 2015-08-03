@@ -1,5 +1,6 @@
 HYDROGEN = 1.007825
-NEUTRON = 1.008701
+#NEUTRON = 1.008701
+NEUTRON = 1.003355
 
 #We use X!Tandem notation for enzymatic digestion:
 #http://thegpm.org/TANDEM/api/pcs.html

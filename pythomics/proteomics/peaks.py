@@ -215,9 +215,9 @@ def findMicro(df, pos, ppm=None):
 
     # new logic is nm
     sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs((v-df.index[pos])/df.index[pos])) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
-    sorted_peaks = filter(lambda x: x[1]<tolerance, sorted_peaks)
-    if not sorted_peaks:
-        return {'int': 0}
+    # if not filter(lambda x: x[1]<tolerance, sorted_peaks):
+    #     print sorted_peaks
+    #     return {'int': 0}
     peak = sorted_peaks[0][0]
     # interpolate our mean/std to a linear range
     from scipy.interpolate import interp1d
@@ -716,6 +716,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=1, charge=2, debug=
         largest_loc = best_locations[index]
         micro_index = df.index.searchsorted(largest_loc)
         micro_bounds = findMicro(df, micro_index, ppm=ppm)
+        # print best_locations[index], df.name, micro_bounds['int']
         # check the deviation of our checked peak from the identified peak
         # this additional logic: micro_check
         #micro_ppm = abs(df.index[micro_index]-df.index[int(np.round(np.mean(micro_bounds)))])/df.index[micro_index]
