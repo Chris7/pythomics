@@ -203,7 +203,7 @@ def findMicro(df, pos, ppm=None):
         changes, this assumes it's roughly gaussian and there is little interference
     """
     # find the edges within our tolerance
-    tolerance = ppm/1e6*2
+    tolerance = ppm/1e6
     df_empty_index = df[df==0].index
     right = df_empty_index.searchsorted(df.index[pos])
     left = right-1
@@ -211,13 +211,8 @@ def findMicro(df, pos, ppm=None):
             df.index.searchsorted(df_empty_index[right]))
     right += 1
     y = df.iloc[left:right]
-    #if df.index[pos] > 644.3355 and df.index[pos] < 644.3356:
-     #   pass
-    #print y
-    #y.index = range(len(y))
     peaks, peak_centers = findAllPeaks(y)
-   # if df.index[pos] > 620 and df.index[pos] < 621:
-    #    print df.index[pos],y
+
     # new logic is nm
     sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs((v-df.index[pos])/df.index[pos])) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
     sorted_peaks = filter(lambda x: x[1]<tolerance, sorted_peaks)
@@ -620,7 +615,7 @@ def looper(selected=None, df=None, theo=None, index=0, out=None):
         residual = ((theo-vals)**2).sum()
         yield (residual, copy.deepcopy(out))
 
-def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False,
+def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=1, charge=2, debug=False,
                  heavy=False, isotope_offset=0, theo_dist=None, label=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
@@ -628,6 +623,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False,
     if max_mz is not None:
         max_mz = max_mz/float(charge) if isotope_offset == 0 else (max_mz+isotope_offset*NEUTRON)/float(charge)
     tolerance = ppm/1000000.0
+    tolerance2 = ppm2/1000000.0
 
     non_empty = df[df>0].dropna()
     non_empty_ind = non_empty.index.searchsorted(start_mz)
@@ -666,6 +662,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False,
     # env_dict[isotope_index] = start_index
     valid_locations2 = OrderedDict()
     valid_locations2[isotope_index] = list(start_df.index)
+    tolerance = tolerance2
 
     # micro means return the 'micro envelope' which is the envelope of each isotopic cluster, start with our beginning isotope
     # micro_dict[isotope_index] = findMicro(df, start_index, ppm=ppm)
@@ -718,7 +715,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, charge=2, debug=False,
     for index, isotope_index in enumerate(valid_keys):
         largest_loc = best_locations[index]
         micro_index = df.index.searchsorted(largest_loc)
-        micro_bounds = findMicro(df, micro_index, ppm=ppm)
+        micro_bounds = findMicro(df, micro_index, ppm=ppm2)
         # check the deviation of our checked peak from the identified peak
         # this additional logic: micro_check
         #micro_ppm = abs(df.index[micro_index]-df.index[int(np.round(np.mean(micro_bounds)))])/df.index[micro_index]

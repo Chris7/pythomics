@@ -267,7 +267,7 @@ class Worker(Process):
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max if shift_max is not None else None
                         envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max,
-                                                      charge=charge, ppm=5, heavy=True, theo_dist=theo_dist, label=precursor_label)
+                                                      charge=charge, ppm=5, ppm2=1, heavy=True, theo_dist=theo_dist, label=precursor_label)
                         peaks_found = data[precursor_label]['peaks']
                         # look for Proline/Glutamate/Glutamines
                         # if 'P' in peptide or 'E' in peptide or 'Q' in peptide:
@@ -416,7 +416,26 @@ class Worker(Process):
                 # get two most common peak, pick the closest to our RT
                 # we may need to add a check for a minimal # of in for max distance from the RT as well here.
                 common_peaks = pd.Series([peak['peak'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks]).value_counts()
-                tcommon_peaks = common_peaks[common_peaks>=4]
+                common_peaks = common_peaks.sort_index()
+                tcommon_peaks = common_peaks[common_peaks>=3]
+
+                # combine peaks that are separated by a single scan
+                spillover = {}
+                spillover_peaks = tcommon_peaks.index.to_series().apply(lambda x: np.where(xdata==x)[0][0])
+                spillover_peaks = spillover_peaks.sort_index()
+                spillover = defaultdict(list)
+                for index, value in spillover_peaks.iteritems():
+                    spillover_matches = spillover_peaks==(value+1)
+                    print index, value,spillover_matches.any()
+                    if spillover_matches.any():
+                        spillover[spillover_peaks[spillover_matches].index[0]].extend(spillover.get(index, [index]))
+                    else:
+                        spillover[index].extend([index])
+                new_common = pd.Series(0, index=spillover.keys())
+                for i,v in spillover.iteritems():
+                    new_common[i] += sum([tcommon_peaks[val] for val in v])
+                tcommon_peaks = new_common
+
                 if tcommon_peaks.any():
                     common_peaks = tcommon_peaks if tcommon_peaks.any() else common_peaks
                     common_peaks_deltas = sorted([(i, np.abs(i-start_rt)) for i in common_peaks.index], key=operator.itemgetter(1))
@@ -433,7 +452,7 @@ class Worker(Process):
                         xdata = rt_values.index.values.astype(float)
                         ydata = rt_values.fillna(0)
                         closest_rts = sorted([(i, np.abs(i['peak']-common_peak)) for i in values], key=operator.itemgetter(1))[0][0]
-                        # if we move more than a ms1, ignore
+                        # if we move more than a # of ms1 to the dominant peak, update to our known peak
                         gc = 'k'
                         peak_loc = np.where(xdata == closest_rts['peak'])[0][0]
                         mean = closest_rts['mean']
