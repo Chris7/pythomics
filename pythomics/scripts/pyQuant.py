@@ -412,6 +412,7 @@ class Worker(Process):
                             ax.set_xticklabels([])
                         ax.plot(xdata, ydata, 'bo-', alpha=0.7)
                         ax.plot(xdata, self.gauss_ndim(xdata, *res.x)*mval, color='r')
+                        # ax.set_ylim(0,combined_data.max().max())
                 # get two most common peak, pick the closest to our RT
                 # we may need to add a check for a minimal # of in for max distance from the RT as well here.
                 common_peaks = pd.Series([peak['peak'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks]).value_counts()
@@ -423,22 +424,33 @@ class Worker(Process):
                 else:
                     common_peak = common_peaks.index[0]
                 common_loc = np.where(xdata==common_peak)[0][0]
+                common_var = pd.Series([peak['var'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks if peak['peak'] == common_peak]).median()
                 for quant_label, quan_values in combined_peaks.items():
                     for index, values in quan_values.items():
-                        row_num = plot_index[index, quant_label]
                         if not values:
                             continue
+                        rt_values = combined_data.loc[index]
+                        xdata = rt_values.index.values.astype(float)
+                        ydata = rt_values.fillna(0)
                         closest_rts = sorted([(i, np.abs(i['peak']-common_peak)) for i in values], key=operator.itemgetter(1))[0][0]
                         # if we move more than a ms1, ignore
                         gc = 'k'
-                        peak_loc = np.where(xdata==closest_rts['peak'])[0][0]
-                        if len(xdata) >= 3 and np.abs(peak_loc-common_loc) > 2:
-                            gc = 'c'
-                        peak_params = (closest_rts['amp'], closest_rts['mean'], closest_rts['var'])
+                        peak_loc = np.where(xdata == closest_rts['peak'])[0][0]
+                        mean = closest_rts['mean']
+                        amp = closest_rts['amp']
+                        mean_diff = (mean-xdata[common_loc])/(xdata[1]-xdata[0])
+                        if len(xdata) >= 3 and (np.abs(peak_loc-common_loc) > 2 or mean_diff > 2):
+                            mean = common_peak
+                            amp = ydata[common_peak]
+                            gc = 'g'
+                        var = common_var if closest_rts['var']/common_var > 2 else closest_rts['var']
+                        peak_params = (amp,  mean, var)
                         # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
                         # gauss beats simps/sumtraps/quadrature/fixed_quad
                         left_rt, right_rt = peak_params[1]-2.5*np.abs(peak_params[2]),peak_params[1]+2.5*np.abs(peak_params[2])
                         int_val = integrate.quad(self.gauss, xdata[0], xdata[-1], args=peak_params)[0]
+                        # This interferes with cases where we quantify the heavy version of a peptide by searching for its peak
+                        # and that peptide later appears as a fragment ion.
                         # for micro_rt, micro_info in chosen_window.items():
                         #     if not (left_rt <= micro_rt <= right_rt):
                         #         continue
@@ -452,13 +464,13 @@ class Worker(Process):
                         #             micro_df.iloc[left:right][micro_df.iloc[left:right]<0] = 0
                         #if int_val == np.nan or int(int_val) == 0 and quant_label == 'Light':
                          #   pass
-                        if int_val and not pd.isnull(int_val) and gc == 'k':
+                        if int_val and not pd.isnull(int_val) and gc != 'c':
                             quant_vals[quant_label] += int_val
                     #     quant_vals[quant_label] += integrate.simps(ydata*mval, xdata)
                         if self.html:
                             ax = fig.add_subplot(subplot_rows, subplot_columns, fig_map.get(index))
                             ax.plot(xdata, self.gauss(xdata, *peak_params), '{}o-'.format(gc), alpha=0.7)
-                            ax.set_ylim(0, peak_params[0])
+                            ax.set_ylim(0, amp)
 
                 for silac_label1 in data.keys():
                     qv1 = quant_vals.get(silac_label1)
