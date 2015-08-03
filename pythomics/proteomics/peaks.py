@@ -215,9 +215,9 @@ def findMicro(df, pos, ppm=None):
 
     # new logic is nm
     sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs((v-df.index[pos])/df.index[pos])) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
-    sorted_peaks = filter(lambda x: x[1]<tolerance, sorted_peaks)
-    if not sorted_peaks:
-        return {'int': 0}
+    # sorted_peaks = filter(lambda x: x[1]<tolerance, sorted_peaks)
+    # if not sorted_peaks:
+    #     return {'int': 0}
     peak = sorted_peaks[0][0]
     # interpolate our mean/std to a linear range
     from scipy.interpolate import interp1d
