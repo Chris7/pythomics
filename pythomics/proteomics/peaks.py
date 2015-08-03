@@ -256,6 +256,8 @@ def gauss_func( guess, *args):
 def findAllPeaks(values):
     xdata = values.index.values.astype(float)
     ydata = values.fillna(0).values.astype(float)
+    from scipy.ndimage.filters import gaussian_filter1d
+    ydata = gaussian_filter1d(ydata, 1, mode='constant')
     mval = ydata.max()
     ydata /= ydata.max()
     peaks_found = {}
