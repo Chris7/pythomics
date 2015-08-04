@@ -204,7 +204,7 @@ def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
         changes, this assumes it's roughly gaussian and there is little interference
     """
     # find the edges within our tolerance
-    tolerance = 5/1e6 if isotope == 0 else 3/1e6
+    tolerance = 5/1e6 if isotope == 0 else 2/1e6
     offset = spacing*isotope
     df_empty_index = df[df==0].index
     right = df_empty_index.searchsorted(df.index[pos])
@@ -222,7 +222,8 @@ def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
     fit = True
     top_mu = sorted_peaks[0][0][1]
     top_std = sorted_peaks[0][0][2]
-    if not filter(lambda x: x[1]<tolerance, sorted_peaks) and not (top_mu-1.5*top_std < df.index[pos] < top_mu+1.5*top_std):
+    if not filter(lambda x: x[1]<tolerance, sorted_peaks):# and not (top_mu-1.5*top_std < df.index[pos] < top_mu+1.5*top_std):
+        # print df.name, df.index[pos], isotope
         fit = False
 
     peak = sorted_peaks[0][0]
@@ -249,12 +250,13 @@ def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
 #        print y, peak, gauss(y.index.values, *peak)
     int_val = integrate.quad(gauss, -np.inf, np.inf, args=peak_gauss)[0]
     # if fit is False:
+    # if df.index[pos] > 800.9 and df.index[pos] < 800.93:
     #     plt.title('{} - {} - {}'.format(isotope, int_val, sorted_peaks[0][1]))
     #     bar_width = (y.index.values[1]-y.index.values[0])/4,
     #     plt.bar(y.index.values, y.values, width=bar_width,  align='center', facecolor='b')
     #     plt.plot(y.index.values, gauss(y.index.values, *peak), 'ro-')
     #     plt.bar(df.index[pos], df.iloc[pos], width=bar_width, align='center', facecolor='k' if fit else 'g')
-    #     ax.get_figure().savefig('colidebug_{}'.format(df.index[pos]), format='png', dpi=100)
+    #     ax.get_figure().savefig('acolidebug_{}_{}_{}'.format(df.name, isotope, df.index[pos]), format='png', dpi=100)
     #     print fit, isotope, sorted_peaks, tolerance
     return {'int': int_val if fit else 0, 'bounds': (left, right), 'params': peak}
 
@@ -641,12 +643,12 @@ def looper(selected=None, df=None, theo=None, index=0, out=None):
         yield (residual, copy.deepcopy(out))
 
 def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=False,
-                 heavy=False, isotope_offset=0, theo_dist=None, label=None):
+                 heavy=False, isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
     start_mz = start_mz/float(charge) if isotope_offset == 0 else (start_mz+isotope_offset*NEUTRON)/float(charge)
     if max_mz is not None:
-        max_mz = max_mz/float(charge) if isotope_offset == 0 else (max_mz+isotope_offset*NEUTRON)/float(charge)
+        max_mz = max_mz/float(charge)-spacing*0.9 if isotope_offset == 0 else (max_mz+isotope_offset*NEUTRON)/float(charge)
     tolerance = ppm/1000000.0
     tolerance2 = ppm2/1000000.0
 
@@ -743,6 +745,8 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
     # search out and create the micro envelope for this
     # micro_envelopes.append((min_loc, max_loc+1))#self.findMicro(df, micro_index, charge=charge))
     for index, isotope_index in enumerate(valid_keys):
+        if skip_isotopes is not None and isotope_index in skip_isotopes:
+            continue
         largest_loc = best_locations[index]
         micro_index = df.index.searchsorted(largest_loc)
         micro_bounds = findMicro(df, micro_index, ppm=3, start_mz=start, isotope=isotope_index, spacing=spacing)
