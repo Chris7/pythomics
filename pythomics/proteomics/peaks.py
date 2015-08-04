@@ -211,7 +211,7 @@ def findMicro(df, pos, ppm=None):
             df.index.searchsorted(df_empty_index[right]))
     right += 1
     y = df.iloc[left:right]
-    peaks, peak_centers = findAllPeaks(y)
+    peaks, peak_centers = findAllPeaks(y, min_dist=(y.index[1]-y.index[0])*2)
 
     # new logic is nm
     sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs((v-df.index[pos])/df.index[pos])) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
@@ -234,6 +234,14 @@ def findMicro(df, pos, ppm=None):
         return {'int': 0}
     peak_gauss = (peak[0]*y.max(), mu, std)
     peak[0] *= y.max()
+    #from matplotlib import pyplot as plt
+    #fig = plt.figure()
+    #ax = y.plot()
+    #if str(df.index[pos]).startswith('418.22071'):
+#        print sorted_peaks
+#        print y, peak, gauss(y.index.values, *peak)
+ #   plt.plot(y.index.values, gauss(y.index.values, *peak), 'ro-')
+  #  ax.get_figure().savefig('colidebug_{}'.format(df.index[pos]), format='png', dpi=100)
     return {'int': integrate.quad(gauss, -np.inf, np.inf, args=peak_gauss)[0], 'bounds': (left, right), 'params': peak}
 
 def gauss(x, amp, mu, std):
@@ -253,18 +261,18 @@ def gauss_func( guess, *args):
     # residual sum of squares for this data.
     return sum(np.abs(ydata-data.values)**2)
 
-def findAllPeaks(values):
+def findAllPeaks(values, min_dist=0):
     xdata = values.index.values.astype(float)
     ydata = values.fillna(0).values.astype(float)
-    from scipy.ndimage.filters import gaussian_filter1d
-    ydata_peaks = gaussian_filter1d(ydata, 0.25, mode='constant')
+    #from scipy.ndimage.filters import gaussian_filter1d
+    ydata_peaks = ydata#gaussian_filter1d(ydata, 0.25, mode='constant')
     mval = ydata.max()
     ydata /= ydata.max()
     peaks_found = {}
     for peak_width in xrange(1,3):
         row_peaks = argrelmax(ydata_peaks, order=peak_width)[0]
         if not row_peaks.any():
-            row_peaks = [np.argmax(ydata_peaks)]
+            row_peaks = [np.argmax(ydata)]
         minima = [i for i,v in enumerate(ydata_peaks) if v == 0]
         minima.extend([i for i in argrelmin(ydata_peaks, order=peak_width)[0] if i not in minima])
         minima.sort()
@@ -287,13 +295,13 @@ def findAllPeaks(values):
         bnds = []
         last_peak = None
         for peak_num, peak_index in enumerate(row_peaks):
-            next_peak = len(xdata) if peak_index == row_peaks[-1] else row_peaks[peak_num+1]
+            next_peak = len(xdata)-1 if peak_index == row_peaks[-1] else row_peaks[peak_num+1]
             peak_min, peak_max = xdata[peak_index]-0.2, xdata[peak_index]+0.2
 
             peak_min = xdata[0] if peak_min < xdata[0] else peak_min
             peak_max = xdata[-1] if peak_max > xdata[-1] else peak_max
             rel_peak = ydata[peak_index]/sum(ydata[row_peaks])
-            bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, 0.2)])
+            bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, 0.4)])
             # find the points around it to estimate the std of the peak
             left = 0
             for i,v in enumerate(minima):
@@ -331,8 +339,9 @@ def findAllPeaks(values):
                         variance = 0.05
             else:
                 variance = 0.05
+                average = xdata[peak_index]
             if variance is not None:
-                guess.extend([ydata[peak_index], xdata[peak_index], variance])
+                guess.extend([ydata[peak_index], average, variance])
         if not guess:
             average = np.average(xdata, weights=ydata)
             variance = np.sqrt(np.average((xdata-average)**2, weights=ydata))
@@ -658,7 +667,9 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
     isotope_index += isotope_offset
     # find the largest intensity within our tolerance
     start_df = df.iloc[df.index.searchsorted(start-start*tolerance/2):df.index.searchsorted(start+start*tolerance/2),]
-    start = start_df.idxmax()
+    #start = start_df.idxmax()
+    # find the com
+    start = findMicro(df, df.index.searchsorted(start_df.idxmax()))['params'][1]
     start_index = df.index.searchsorted(start)
     # find the largest in our tolerance
     # env_dict[isotope_index] = start_index
