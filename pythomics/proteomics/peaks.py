@@ -6,6 +6,7 @@ import math
 from scipy.misc import comb
 
 import pandas as pd
+from matplotlib import pyplot as plt
 from scipy import integrate
 
 from pythomics.proteomics.config import NEUTRON, RESIDUE_COMPOSITION, ELEMENTS
@@ -197,13 +198,14 @@ def fit_data(data, charge=1.0, peptide=None):
     return {'fit': fitted, 'residual': res.fun}
 
 
-def findMicro(df, pos, ppm=None):
+def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
     """
         We want to find the boundaries of our isotopic clusters. Basically we search until our gradient
         changes, this assumes it's roughly gaussian and there is little interference
     """
     # find the edges within our tolerance
-    #tolerance = ppm/1e6*2
+    tolerance = 5/1e6 if isotope == 0 else 3/1e6
+    offset = spacing*isotope
     df_empty_index = df[df==0].index
     right = df_empty_index.searchsorted(df.index[pos])
     left = right-1
@@ -212,12 +214,17 @@ def findMicro(df, pos, ppm=None):
     right += 1
     y = df.iloc[left:right]
     peaks, peak_centers = findAllPeaks(y, min_dist=(y.index[1]-y.index[0])*2)
+    if start_mz is None:
+        start_mz = df.index[pos]
 
     # new logic is nm
-    sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs((v-df.index[pos])/df.index[pos])) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
-    #if not filter(lambda x: x[1]<tolerance, sorted_peaks):
-      #  print df.index[pos], sorted_peaks, y
-       # return {'int': 0}
+    sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs(np.abs(start_mz-v)-offset)/v) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
+    fit = True
+    top_mu = sorted_peaks[0][0][1]
+    top_std = sorted_peaks[0][0][2]
+    if not filter(lambda x: x[1]<tolerance, sorted_peaks) and not (top_mu-1.5*top_std < df.index[pos] < top_mu+1.5*top_std):
+        fit = False
+
     peak = sorted_peaks[0][0]
     # interpolate our mean/std to a linear range
     from scipy.interpolate import interp1d
@@ -234,15 +241,22 @@ def findMicro(df, pos, ppm=None):
         return {'int': 0}
     peak_gauss = (peak[0]*y.max(), mu, std)
     peak[0] *= y.max()
-    #from matplotlib import pyplot as plt
-    #fig = plt.figure()
-    #ax = y.plot()
+
+    fig = plt.figure()
+    ax = plt.figure().gca()
     #if str(df.index[pos]).startswith('418.22071'):
 #        print sorted_peaks
 #        print y, peak, gauss(y.index.values, *peak)
- #   plt.plot(y.index.values, gauss(y.index.values, *peak), 'ro-')
-  #  ax.get_figure().savefig('colidebug_{}'.format(df.index[pos]), format='png', dpi=100)
-    return {'int': integrate.quad(gauss, -np.inf, np.inf, args=peak_gauss)[0], 'bounds': (left, right), 'params': peak}
+    int_val = integrate.quad(gauss, -np.inf, np.inf, args=peak_gauss)[0]
+    # if fit is False:
+    #     plt.title('{} - {} - {}'.format(isotope, int_val, sorted_peaks[0][1]))
+    #     bar_width = (y.index.values[1]-y.index.values[0])/4,
+    #     plt.bar(y.index.values, y.values, width=bar_width,  align='center', facecolor='b')
+    #     plt.plot(y.index.values, gauss(y.index.values, *peak), 'ro-')
+    #     plt.bar(df.index[pos], df.iloc[pos], width=bar_width, align='center', facecolor='k' if fit else 'g')
+    #     ax.get_figure().savefig('colidebug_{}'.format(df.index[pos]), format='png', dpi=100)
+    #     print fit, isotope, sorted_peaks, tolerance
+    return {'int': int_val if fit else 0, 'bounds': (left, right), 'params': peak}
 
 def gauss(x, amp, mu, std):
     return amp*np.exp(-(x - mu)**2/(2*std**2))
@@ -731,7 +745,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
     for index, isotope_index in enumerate(valid_keys):
         largest_loc = best_locations[index]
         micro_index = df.index.searchsorted(largest_loc)
-        micro_bounds = findMicro(df, micro_index, ppm=3)
+        micro_bounds = findMicro(df, micro_index, ppm=3, start_mz=start, isotope=isotope_index, spacing=spacing)
         # print best_locations[index], df.name, micro_bounds['int']
         # check the deviation of our checked peak from the identified peak
         # this additional logic: micro_check
@@ -748,6 +762,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
         #     micro_dict[isotope_index] = None
         #     env_dict[isotope_index] = None
         #     ppm_dict[isotope_index] = 0
+    plt.close('all')
     return {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
 
 
