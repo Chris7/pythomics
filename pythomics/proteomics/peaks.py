@@ -257,16 +257,16 @@ def findAllPeaks(values):
     xdata = values.index.values.astype(float)
     ydata = values.fillna(0).values.astype(float)
     from scipy.ndimage.filters import gaussian_filter1d
-    ydata = gaussian_filter1d(ydata, 0.25, mode='constant')
+    ydata_peaks = gaussian_filter1d(ydata, 0.25, mode='constant')
     mval = ydata.max()
     ydata /= ydata.max()
     peaks_found = {}
     for peak_width in xrange(1,3):
-        row_peaks = argrelmax(ydata, order=peak_width)[0]
+        row_peaks = argrelmax(ydata_peaks, order=peak_width)[0]
         if not row_peaks.any():
-            row_peaks = [np.argmax(ydata)]
-        minima = [i for i,v in enumerate(ydata) if v == 0]
-        minima.extend([i for i in argrelmin(ydata, order=peak_width)[0] if i not in minima])
+            row_peaks = [np.argmax(ydata_peaks)]
+        minima = [i for i,v in enumerate(ydata_peaks) if v == 0]
+        minima.extend([i for i in argrelmin(ydata_peaks, order=peak_width)[0] if i not in minima])
         minima.sort()
         peaks_found[peak_width] = {'peaks': row_peaks, 'minima': minima}
     # collapse identical orders
