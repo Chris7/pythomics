@@ -215,9 +215,9 @@ def findMicro(df, pos, ppm=None):
 
     # new logic is nm
     sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs((v-df.index[pos])/df.index[pos])) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
-    # if not filter(lambda x: x[1]<tolerance, sorted_peaks):
-    #     print sorted_peaks
-    #     return {'int': 0}
+    if not filter(lambda x: x[1]<tolerance, sorted_peaks):
+        print sorted_peaks
+        return {'int': 0}
     peak = sorted_peaks[0][0]
     # interpolate our mean/std to a linear range
     from scipy.interpolate import interp1d
@@ -617,7 +617,7 @@ def looper(selected=None, df=None, theo=None, index=0, out=None):
         residual = ((theo-vals)**2).sum()
         yield (residual, copy.deepcopy(out))
 
-def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=1, charge=2, debug=False,
+def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=False,
                  heavy=False, isotope_offset=0, theo_dist=None, label=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
@@ -625,7 +625,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=1, charge=2, debug=
     if max_mz is not None:
         max_mz = max_mz/float(charge) if isotope_offset == 0 else (max_mz+isotope_offset*NEUTRON)/float(charge)
     tolerance = ppm/1000000.0
-    tolerance2 = tolerance#ppm2/1000000.0
+    tolerance2 = ppm2/1000000.0
 
     non_empty = df[df>0].dropna()
     non_empty_ind = non_empty.index.searchsorted(start_mz)
@@ -717,7 +717,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=1, charge=2, debug=
     for index, isotope_index in enumerate(valid_keys):
         largest_loc = best_locations[index]
         micro_index = df.index.searchsorted(largest_loc)
-        micro_bounds = findMicro(df, micro_index, ppm=ppm)
+        micro_bounds = findMicro(df, micro_index, ppm=ppm2)
         # print best_locations[index], df.name, micro_bounds['int']
         # check the deviation of our checked peak from the identified peak
         # this additional logic: micro_check
