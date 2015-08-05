@@ -272,7 +272,7 @@ class Worker(Process):
                                                       theo_dist=theo_dist, label=precursor_label, skip_isotopes=finished_isotopes[precursor_label])
                         peaks_found = data[precursor_label]['peaks']
 
-                        if ms1 == 5479 and precursor_label == 'Heavy' and delta == 1:
+                        if ms1 == 3400 and precursor_label == 'Medium':
                             pass
 
                         # look for Proline/Glutamate/Glutamines
@@ -513,11 +513,14 @@ class Worker(Process):
                         if silac_label1 == silac_label2:
                             continue
                         qv2 = quant_vals.get(silac_label2)
-                        #common_isotopes = set(qv1.keys()).intersection(qv2.keys())
-                        common_isotopes = set(qv1.keys()).union(qv2.keys())
-                        quant1 = sum([qv1.get(i, 0) for i in common_isotopes])
-                        quant2 = sum([qv2.get(i, 0) for i in common_isotopes])
-                        result_dict.update({'{}_{}_ratio'.format(silac_label1, silac_label2): quant1/quant2 if quant1 and quant2 else 'NA'})
+                        ratio = 'NA'
+                        if qv1 is not None and qv2 is not None:
+                            #common_isotopes = set(qv1.keys()).intersection(qv2.keys())
+                            common_isotopes = set(qv1.keys()).union(qv2.keys())
+                            quant1 = sum([qv1.get(i, 0) for i in common_isotopes])
+                            quant2 = sum([qv2.get(i, 0) for i in common_isotopes])
+                            ratio = quant1/quant2 if quant1 and quant2 else 'NA'
+                        result_dict.update({'{}_{}_ratio'.format(silac_label1, silac_label2): ratio})
 
                 if self.html:
                     # colors = ['blue', 'green', 'red', 'cyan', 'magenta', 'yellow']

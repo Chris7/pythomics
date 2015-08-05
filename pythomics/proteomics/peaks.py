@@ -3,6 +3,7 @@ from operator import itemgetter
 import random
 from collections import Counter
 import math
+import itertools
 from scipy.misc import comb
 
 import pandas as pd
@@ -741,9 +742,6 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
 
     best_locations = [sorted(valid_locations2[i], key=itemgetter(0))[0][1] for i in valid_keys]
 
-    # min_loc, max_loc = df.index.searchsorted(min(valid_locations)), df.index.searchsorted(max(valid_locations))
-    # search out and create the micro envelope for this
-    # micro_envelopes.append((min_loc, max_loc+1))#self.findMicro(df, micro_index, charge=charge))
     for index, isotope_index in enumerate(valid_keys):
         if skip_isotopes is not None and isotope_index in skip_isotopes:
             continue
@@ -767,6 +765,51 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
         #     env_dict[isotope_index] = None
         #     ppm_dict[isotope_index] = 0
     plt.close('all')
+    # in all cases, the envelope is going to be either monotonically decreasing, or a parabola (-x^2)
+    isotope_pattern = [(isotope_index, isotope_dict['int']) for isotope_index, isotope_dict in micro_dict.items()]
+    # are we monotonically decreasing?
+    remove = False
+    if len(isotope_pattern) > 2:
+        # check if the 2nd isotope is smaller than the first. This is a classical case looking like:
+        #
+        #  |
+        #  |  |
+        #  |  |  |
+        #  |  |  |  |
+
+        if isotope_pattern[1][1] < isotope_pattern[0][1]:
+            # we are, check this trend holds and remove isotopes it fails for
+            for i,j in zip(isotope_pattern, isotope_pattern[1:]):
+                if j[1] > i[1]:
+                    # the pattern broke, remove isotopes beyond this point
+                    remove = True
+                if remove:
+                    env_dict.pop(j[0])
+                    micro_dict.pop(j[0])
+                    ppm_dict.pop(j[0])
+
+        # check if the 2nd isotope is larger than the first. This is a case looking like:
+        #
+        #
+        #     |  |
+        #     |  |
+        #  |  |  |  |
+
+        elif isotope_pattern[1][1] > isotope_pattern[0][1]:
+            shift = False
+            for i,j in zip(isotope_pattern, isotope_pattern[1:]):
+                if shift and j[1] > i[1]:
+                    remove = True
+                elif shift is False and j[1] < i[1]:
+                    if shift:
+                        remove = True
+                    else:
+                        shift = True
+                if remove:
+                    env_dict.pop(j[0])
+                    micro_dict.pop(j[0])
+                    ppm_dict.pop(j[0])
+
     return {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
 
 
