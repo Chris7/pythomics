@@ -430,8 +430,8 @@ class Worker(Process):
                         amp = closest_rts['amp']
                         mean_diff = np.abs(mean-xdata[common_loc])
                         if len(xdata) >= 3 and (np.abs(peak_loc-common_loc) > 2 or mean_diff > 0.3):
-                            # mean = common_peak
-                            # amp = ydata[common_peak]
+                            mean = common_peak
+                            amp = ydata[common_peak]
                             gc = 'g'
                         var_rat = closest_rts['var']/common_var
                         var = closest_rts['var']
