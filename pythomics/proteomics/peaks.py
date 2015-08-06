@@ -198,7 +198,6 @@ def fit_data(data, charge=1.0, peptide=None):
     fitted = fit1*data_max
     return {'fit': fitted, 'residual': res.fun}
 
-
 def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
     """
         We want to find the boundaries of our isotopic clusters. Basically we search until our gradient
@@ -244,8 +243,8 @@ def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
     peak_gauss = (peak[0]*y.max(), mu, std)
     peak[0] *= y.max()
 
-    fig = plt.figure()
-    ax = plt.figure().gca()
+    # fig = plt.figure()
+    # ax = plt.figure().gca()
     #if str(df.index[pos]).startswith('418.22071'):
 #        print sorted_peaks
 #        print y, peak, gauss(y.index.values, *peak)

@@ -23,7 +23,7 @@ from collections import OrderedDict, defaultdict
 from itertools import izip_longest
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Manager
 try:
     from profilestats import profile
 except ImportError:
@@ -67,13 +67,50 @@ parser.add_argument('-o', '--out', nargs='?', help='Stuff', type=str)
 
 import random
 
+class Reader(Process):
+    def __init__(self, incoming, outgoing, scan_dict=None, raw_file=None, ms2_ms1_map=None, scan_rt_map=None, rt_index_map=None):
+        super(Reader, self).__init__()
+        self.incoming = incoming
+        self.outgoing = outgoing
+        self.ms2_ms1_map = ms2_ms1_map
+        self.scan_rt_map = scan_rt_map
+        self.rt_index_map = rt_index_map
+        self.scan_dict = scan_dict
+        self.raw = GuessIterator(raw_file, full=False, store=False, ms_filter=1)
+        sys.stderr.write('Thread processing peptide file.\n')
+        for index, i in enumerate(self.raw):
+            if index % 100 == 0:
+                sys.stderr.write('.')
+            if i is None:
+                break
+            if i.ms_level != 1:
+                self.ms2_ms1_map[int(i.id)] = scan_id
+                continue
+            scan_id = int(i.id)
+            rt = i.rt
+            self.scan_rt_map[scan_id] = rt
+            self.rt_index_map[rt] = scan_id
+        sys.stderr.write('Scans Loaded\n')
+
+    def run(self):
+        for scan_id in iter(self.incoming.get, None):
+            if scan_id in self.scan_dict:
+                continue
+            scan = self.raw.getScan(scan_id)
+            self.outgoing.put(scan)
+        sys.stderr.write('reader done\n')
+
+
 class Worker(Process):
     def __init__(self, queue=None, results=None, precision=6, raw_name=None, silac_labels=None,
-                 temp=False, sparse=False, debug=False, html=False, mono=False):
+                 temp=False, sparse=False, debug=False, html=False, mono=False,
+                 scan_dict=None, reader_in=None, reader_out=None, ms2_ms1_map=None, scan_rt_map=None, rt_index_map=None):
         super(Worker, self).__init__()
         self.precision = precision
         self.sparse = sparse
         self.queue=queue
+        self.reader_in, self.reader_out = reader_in, reader_out
+        self.scan_dict, self.ms2_ms1_map, self.scan_rt_map, self.rt_index_map = scan_dict, ms2_ms1_map, scan_rt_map, rt_index_map
         self.results = results
         self.silac_labels = {} if silac_labels is None else silac_labels
         self.shifts = {0: "Light"}
@@ -89,96 +126,62 @@ class Worker(Process):
         self.last_clean = 0 # for cleaning up scans before our current RT window
         sys.stderr.write('Thread spawned: Sparse: {0}\n'.format(self.sparse))
 
-    def getScan(self, ms1, dense=True):
+    def convertScan(self, scan):
         import numpy as np
+        scan_vals = np.array(scan.scans)
+        res = pd.Series(scan_vals[:, 1].astype(np.uint64), index=np.round(scan_vals[:, 0], self.precision), name=scan.rt, dtype='uint64')
+        # due to precision, we have multiple m/z values at the same place. We can eliminate this by grouping them and summing them.
+        # Summation is the correct choice here because we are combining values of a precision higher than we care about.
+        return res.groupby(level=0).sum()
+
+    def getScan(self, ms1):
         ms1 = int(ms1)
-        if ms1 not in self.data:
-            scan = self.raw.getScan(ms1)
-            scan_vals = np.array(scan.scans)
-            res = pd.Series(scan_vals[:, 1].astype(np.uint64), index=np.round(scan_vals[:, 0], self.precision), name=scan.rt, dtype='uint64')
-            # due to precision, we have multiple m/z values at the same place. We can eliminate this by grouping them and summing them.
-            # Summation is the correct choice here because we are combining values of a precision higher than we care about.
-            res = res.groupby(level=0).sum()
-            #if self.sparse:
-             #   res = res.to_sparse(fill_value=0)
-            self.data[ms1] = res
-        return self.data[ms1]#.to_dense() if dense else self.data[ms1]
-
-    @staticmethod
-    def sign(a):
-        return -1 if a < 0 else 1
-
-    def cleanScans(self, rt_map, current_rt):
-        min_rt = current_rt - self.rt_width
-        if min_rt > self.last_clean:
-            old_scans = rt_map[self.last_clean:min_rt].values
-            self.last_clean = current_rt - self.rt_width
-            for i in old_scans:
-                if i in self.data:
-                    del self.data[i]
-            import gc
-            gc.collect()
-
-    def gfit(self, params, X, Y, amp, rt):
-        #mu, std, offset = params[0], params[1], params[2]
-        mu, std = params[0], params[1]
-        if abs(mu-rt) > self.rt_tol:
-            return np.inf
-        fit = amp*np.exp(-(X-mu)**2/(2*std**2))
-        lb, rb = mu-2*abs(std), mu+2*abs(std)
-        fit = np.array([j for i,j in zip(X, fit) if i>=lb or i<=rb])
-        nfit = fit/max(fit)
-        ny = np.array([j for i,j in zip(X, Y) if i>=lb or i<=rb])
-        ny = ny/max(ny)
-        #residuals = (nfit-ny)**2
-        #nfit = fit/max(fit)
-        #ny = Y/max(Y)
-        residuals = sum((nfit-ny)**2)
-        #residuals = sum((fit-Y)**2)
-        return residuals
-
-    def gauss(self, x, amp, mu, std):
-        return amp*np.exp(-(x - mu)**2/(2*std**2))
-
-    def gauss_ndim(self, xdata, *args):
-        amps, mus, sigmas = args[::3], args[1::3], args[2::3]
-        data = pd.Series(0, index=xdata)
-        for amp, mu, sigma in zip(amps, mus, sigmas):
-            data += pd.Series(self.gauss(xdata, amp, mu, sigma), index=xdata)
-        return data
-
-    def gauss_func(self, guess, *args):
-        xdata, ydata = args
-        data = self.gauss_ndim(xdata, *guess)
-        # absolute deviation as our distance metric. Empirically found to give better results than
-        # residual sum of squares for this data.
-        return sum(np.abs(ydata-data.values)**2)
+        try:
+            scan = self.reader_out.get(timeout=0.1)
+            while scan:
+                self.scan_dict[int(scan.title)] = self.convertScan(scan)
+                scan = self.reader_out.get(timeout=0.1)
+        except Empty:
+            pass
+        if ms1 not in self.scan_dict:
+            self.reader_in.put(ms1)
+            try:
+                scan = self.reader_out.get(timeout=0.1)
+            except Empty:
+                return self.getScan(ms1)
+            while int(scan.title) != ms1:
+                self.scan_dict[int(scan.title)] = self.convertScan(scan)
+                try:
+                    scan = self.reader_out.get(timeout=0.1)
+                except Empty:
+                    return self.getScan(ms1)
+            self.scan_dict[int(scan.title)] = self.convertScan(scan)
+            # put scans +- 50 into the queue just to keep it going
+            scans = sorted(self.rt_index_map.values())
+            current_index = scans.index(ms1)
+            left, right = current_index-25, current_index+25
+            if left < 0:
+                left = 0
+            if right > len(scans):
+                right = len(scans)
+            for i in xrange(left, right):
+                self.reader_in.put(scans[i])
+            # clean up scan_dict to kick out old entries to make serialization not so burdensome
+            stored_scans = sorted(self.scan_dict.keys())
+            far_left = left - 50
+            if far_left > 0:
+                to_remove = [i for i in stored_scans if i < scans[far_left]]
+                for i in to_remove:
+                    del self.scan_dict[i]
+        return self.scan_dict[ms1]
 
     def run(self):
         import time
-        args = parser.parse_args()
-        source = self.raw_name
-        self.raw = GuessIterator(source, full=False, store=False, ms_filter=1)
-        self.data = {}
-        self.data2 = pd.DataFrame(dtype='uint16')
-        scan_rt_map = {}
-        rt_index_map = {}
-        ms2_ms1_map = {}
-        sys.stderr.write('Thread processing peptide file.\n')
-        for index, i in enumerate(self.raw):
-            if index % 100 == 0:
-                sys.stderr.write('.')
-            if i is None:
-                break
-            if i.ms_level != 1:
-                ms2_ms1_map[int(i.id)] = scan_id
-                continue
-            scan_id = int(i.id)
-            rt = i.rt
-            scan_rt_map[scan_id] = rt
-            rt_index_map[rt] = scan_id
-        sys.stderr.write('Scans Loaded\n')
-        rt_index_map = pd.Series(rt_index_map)
+        scan_rt_map = dict(self.scan_rt_map.items())
+        rt_index_map = dict(self.rt_index_map.items())
+        ms2_ms1_map = dict(self.ms2_ms1_map.items())
+
+        rt_index_map = pd.Series(dict(rt_index_map.items()))
 
         silac_shifts = {}
         for silac_label, silac_masses in self.silac_labels.items():
@@ -232,14 +235,11 @@ class Worker(Process):
                     silac_shift=0
                     for label_mass, label_masses in silac_masses.items():
                         labels = [label_mass for mod_aa in peptide if mod_aa in label_masses]
-                        # count += len(labels)
                         silac_shift += sum(labels)
                     precursors[silac_label] = silac_shift
                     data[silac_label] = copy.deepcopy(silac_dict)
                 precursors = OrderedDict(sorted(precursors.items(), key=operator.itemgetter(1)))
                 shift_maxes = {i: j for i,j in zip(precursors.keys(), precursors.values()[1:])}
-                rt_width = int(len(rt_index_map[rt-self.rt_width:rt+self.rt_width])/2)
-                # sys.stderr.write('{}\n'.format(rt_width))
                 base_rt = rt_index_map.index.searchsorted(rt)
                 finished = set([])
                 finished_isotopes = {i: set([]) for i in precursors.keys()}
@@ -272,15 +272,6 @@ class Worker(Process):
                                                       theo_dist=theo_dist, label=precursor_label, skip_isotopes=finished_isotopes[precursor_label])
                         peaks_found = data[precursor_label]['peaks']
 
-                        if ms1 == 3400 and precursor_label == 'Medium':
-                            pass
-
-                        # look for Proline/Glutamate/Glutamines
-                        # if 'P' in peptide or 'E' in peptide or 'Q' in peptide:
-                        #     heavy2 = peaks.findEnvelope(df, start_mz=heavy_precursor, isotope_offset=6, charge=charge, ppm=10, heavy=True)
-                        #     print rt_index_map.iloc[base_rt+ms_index], heavy_precursor
-                        #     print heavy
-                        #     print heavy2
                         if not envelope['envelope']:
                             finished.add(precursor_label)
                             continue
@@ -315,7 +306,7 @@ class Worker(Process):
                             combined_data = combined_data.add(selected, axis='index', fill_value=0)
                         else:
                             combined_data = pd.concat([combined_data, selected], axis=1).fillna(0)
-                        #print precursor_label, selected
+
                     if found is False:
                         if delta == -1:
                             delta = 1
@@ -331,36 +322,7 @@ class Worker(Process):
                 combined_data = combined_data[sorted(combined_data.columns)]
                 # shared_isotopes = set([])
                 rt_window.sort()
-                # if self.mono:
-                #     for silac_label, silac_data in data.iteritems():
-                #         peaks_found = silac_data.get('peaks')
-                #         found_isotopes = set(peaks_found.keys())
-                #         if found_isotopes:
-                #             shared_isotopes = shared_isotopes.intersection(found_isotopes) if shared_isotopes else found_isotopes
-                # combine all our peaks and get our RT boundaries. Do it this way fo ra
                 combined_data = combined_data.sort(axis='index').sort(axis='columns')
-                # for silac_label, silac_data in data.iteritems():
-                #     peaks_found = silac_data.get('peaks')
-                #     peak_data = peaks.buildEnvelope(peaks_found=peaks_found, rt_window=rt_window, start_rt=rt, silac_label=silac_label)
-                #     silac_data['df'] = peak_data.get('data')
-                #
-                #     if self.debug or self.html:
-                #         if self.debug:
-                #             pdf = PdfPages('{2}_{0}_{1}_fix.pdf'.format(peptide, ms1, self.raw_name))
-                #             plt.figure()
-                #     light_rt_data = peak_data.get('rt')
-                #     light_int = peak_data.get('integration')
-                #     silac_data['intensity'] = light_int
-                #     if self.debug or self.html:
-                #         plt.figure()
-                #         if not light_rt_data.empty:
-                #             ax = light_rt_data.plot(color='b', title=str(light_int))
-                #             if self.debug:
-                #                 pdf.savefig(figure=ax.get_figure())
-                #             if self.html:
-                #                 fname = '{2}_{0}_{1}_{3}_{4}_rt.png'.format(peptide, ms1, self.filename, scanId, silac_label)
-                #                 ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=50)
-                #                 html_images['{}_rt'.format(silac_label)] = os.path.join(self.html['rel'], fname)
                 from scipy.signal import argrelmax, argrelmin
                 from scipy import integrate
                 from scipy.optimize import minimize
@@ -368,8 +330,7 @@ class Worker(Process):
                 quant_vals = defaultdict(dict)
                 isotope_labels = pd.DataFrame(isotope_labels).T
                 fig_map = {}
-                if ms1 == 1674:
-                    pass
+
                 if self.html:
                     fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
                     fig = plt.figure(figsize=(10,10))
@@ -417,7 +378,7 @@ class Worker(Process):
                     if self.html:
                         ax = fig.add_subplot(subplot_rows, subplot_columns, fig_index)
                         ax.plot(xdata, ydata, 'bo-', alpha=0.7)
-                        ax.plot(xdata, self.gauss_ndim(xdata, *res.x)*mval, color='r')
+                        ax.plot(xdata, peaks.gauss_ndim(xdata, *res.x)*mval, color='r')
                         if labely:
                             labely = False
                         else:
@@ -477,23 +438,7 @@ class Worker(Process):
                         peak_params = (amp,  mean, var)
                         # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
                         # gauss beats simps/sumtraps/quadrature/fixed_quad
-                        int_val = integrate.quad(self.gauss, xdata[0], xdata[-1], args=peak_params)[0]
-                        # This interferes with cases where we quantify the heavy version of a peptide by searching for its peak
-                        # and that peptide later appears as a fragment ion.
-                        # left_rt, right_rt = peak_params[1]-2.5*np.abs(peak_params[2]),peak_params[1]+2.5*np.abs(peak_params[2])
-                        # for micro_rt, micro_info in chosen_window.items():
-                        #     if not (left_rt <= micro_rt <= right_rt):
-                        #         continue
-                        #     for micro_index, d in micro_info.items():
-                        #         if d['int'] and micro_index == index:
-                        #             micro_df = self.getScan(rt_index_map[micro_rt])
-                        #             left, right = d.get('bounds')
-                        #             micro_peak = d.get('params')
-                        #             y = micro_df.iloc[left:right]
-                        #             micro_df.iloc[left:right] -= peaks.gauss(y.index.values, *micro_peak)
-                        #             micro_df.iloc[left:right][micro_df.iloc[left:right]<0] = 0
-                        #if int_val == np.nan or int(int_val) == 0 and quant_label == 'Light':
-                         #   pass
+                        int_val = integrate.quad(peaks.gauss, xdata[0], xdata[-1], args=peak_params)[0]
                         isotope_index = isotope_labels.loc[index, 'isotope_index']
                         if int_val and not pd.isnull(int_val) and gc != 'c':
                             try:
@@ -503,7 +448,7 @@ class Worker(Process):
                     #     quant_vals[quant_label] += integrate.simps(ydata*mval, xdata)
                         if self.html:
                             ax = fig.add_subplot(subplot_rows, subplot_columns, fig_map.get(index))
-                            ax.plot(xdata, self.gauss(xdata, *peak_params), '{}o-'.format(gc), alpha=0.7)
+                            ax.plot(xdata, peaks.gauss(xdata, *peak_params), '{}o-'.format(gc), alpha=0.7)
                             ax.plot([start_rt, start_rt], ax.get_ylim(),'k-')
                             # ax.set_ylim(0, amp)
 
@@ -523,40 +468,6 @@ class Worker(Process):
                         result_dict.update({'{}_{}_ratio'.format(silac_label1, silac_label2): ratio})
 
                 if self.html:
-                    # colors = ['blue', 'green', 'red', 'cyan', 'magenta', 'yellow']
-                    # legends = []
-                    # for silac_label, _ in precursors.iteritems():
-                    #     color = colors.pop(0) if colors else 'black'
-                    #     silac_data = data.get(silac_label)
-                    #     x, y = [],[]
-                    #     ax = plt.subplot(2, 1, 1)
-                    #     cseries = silac_data.get('nb')
-                    #     if cseries is not None:
-                    #         for index, val in zip(cseries.index, cseries):
-                    #             x += [index,index,index]
-                    #             y += [0,val,0]
-                    #         ax.bar(cseries.index, cseries.values, width=1.0/float(charge)/2,
-                    #                color='{}'.format(color), alpha=0.7, label=silac_label)
-                    #     x, y = [],[]
-                    #     light_df = silac_data.get('df')
-                    #     ax = plt.subplot(2, 1, 2)
-                    #     cseries = light_df.fillna(0).sum(axis=1)
-                    #     for index, val in zip(cseries.index, cseries):
-                    #         x += [index,index,index]
-                    #         y += [0,val,0]
-                    #     line = ax.plot(x,y, '{}'.format(color), alpha=0.7)
-                    #     legends.append((line[0], silac_label))
-                    #
-                    # # Put a legend above our top plot
-                    # # shift our plots down
-                    # for i in xrange(1,3):
-                    #     ax = plt.subplot(2, 1, i)
-                    #     box = ax.get_position()
-                    #     # set_position is [left, bottom, width, height]
-                    #     ax.set_position([box.x0, box.y0 - box.height * 0.1,
-                    #                      box.width, box.height * 0.9])
-                    # ax.get_figure().legend([i[0] for i in legends], [i[1] for i in legends], loc='upper center',
-                    #                        fancybox=True, shadow=True, ncol=3)
                     plt.tight_layout()
                     ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=100)
                     html_images['clusters'] = os.path.join(self.html['rel'], fname)
@@ -570,10 +481,7 @@ class Worker(Process):
                         '{}_intensity'.format(silac_label): silac_data['intensity'],
                         '{}_precursor'.format(silac_label): silac_data['precursor']
                     })
-                # print result_dict
                 self.results.put(result_dict)
-                self.cleanScans(rt_index_map, rt)
-                # print 'run tim eis', time.time()-start_time
             except:
                 sys.stderr.write('ERROR ON {0}\n{1}\n{2}\n'.format(ms1, scan_info, traceback.format_exc()))
                 return
@@ -594,6 +502,7 @@ def main():
     sparse = args.no_sparse
     html = args.html
     resume = args.resume
+    manager = Manager()
 
     hdf_filemap = {}
 
@@ -682,9 +591,7 @@ def main():
 
     sys.stderr.write('\nRetention times loaded.\n')
 
-    workers = {}
-    in_queues = {}
-    result_queues = {}
+    workers = []
     completed = 0
     sys.stderr.write('Beginning SILAC quantification.\n')
     scan_count = len(mass_scans)
@@ -767,22 +674,34 @@ def main():
     skip_map = set([])
     if resume:
         import csv
+        key = None
         for entry in csv.reader(open(out.name, 'rb'), delimiter='\t'):
             # key is filename, peptide, modifications, charge, ms2 id
             key = (entry[0], entry[1], entry[5], entry[6], entry[8])
             skip_map.add(key)
+        skip_map.discard(key)
 
     for filename, mass_scans in raw_files.iteritems():
         filepath = hdf_filemap[filename]
         sys.stderr.write('Processing {0}.\n'.format(filename))
         in_queue = Queue()
         result_queue = Queue()
-        in_queues[filename] = in_queue
-        result_queues[filename] = result_queue
-        worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, silac_labels=silac_labels,
-                        temp=save_files, sparse=sparse, debug=args.debug, html=html, mono=args.no_spread)
-        workers[filename] = worker
-        worker.start()
+        reader_in, reader_out = Queue(), Queue()
+        scan_dict = manager.dict()
+
+        ms2_ms1_map = manager.dict()
+        scan_rt_map = manager.dict()
+        rt_index_map = manager.dict()
+        reader = Reader(reader_in, reader_out, scan_dict=scan_dict, raw_file=filepath, ms2_ms1_map=ms2_ms1_map, scan_rt_map=scan_rt_map,
+                        rt_index_map=rt_index_map)
+        reader.start()
+        for i in xrange(threads):
+            worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, silac_labels=silac_labels,
+                            temp=save_files, sparse=sparse, debug=args.debug, html=html, mono=args.no_spread,
+                            reader_in=reader_in, reader_out=reader_out, scan_dict=scan_dict, ms2_ms1_map=ms2_ms1_map,
+                            scan_rt_map=scan_rt_map, rt_index_map=rt_index_map)
+            workers.append(worker)
+            worker.start()
 
         for scan_index, v in enumerate(mass_scans):
             if resume:
@@ -798,70 +717,56 @@ def main():
             params['scan'] = scan
             in_queue.put(params)
 
-
-
         sys.stderr.write('{0} processed and placed into queue.\n'.format(filename))
 
         in_queue.put(None)
-        if len(workers) == threads:
-            # clear the queues
-            while workers:
-                empty_queue = set([])
-                for rawstr, queue in result_queues.iteritems():
-                    if rawstr in empty_queue:
-                        continue
-                    try:
-                        result = queue.get(timeout=0.1)
-                    except Empty:
-                        continue
-                    if result is None:
-                        worker = workers[rawstr]
-                        if worker.is_alive():
-                            worker.terminate()
-                        del workers[rawstr]
-                        empty_queue.add(rawstr)
-                    else:
-                        completed += 1
-                        if completed % 10 == 0:
-                            sys.stderr.write('\r{0:2.2f}% Completed'.format(completed/scan_count*100))
-                            sys.stderr.flush()
-                            # sys.stderr.write('Processed {0} of {1}...\n'.format(completed, scan_count))
-                        res = '{0}\t{1}\n'.format(rawstr, '\t'.join([str(result.get(i[0], 'NA')) for i in RESULT_ORDER]))
-                        out.write(res)
-                        out.flush()
-                        if html:
-                            html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
-                            html_out.flush()
-            workers = {}
-            result_queues = {}
-
-    while workers:
-        empty_queue = set([])
-        for rawstr, queue in result_queues.iteritems():
-            if rawstr in empty_queue:
-                continue
+        none_count = 0
+        while workers:
             try:
-                result = queue.get(timeout=0.1)
+                result = result_queue.get(timeout=0.1)
             except Empty:
                 continue
             if result is None:
-                worker = workers[rawstr]
-                if worker.is_alive():
-                    worker.terminate()
-                del workers[rawstr]
-                empty_queue.add(rawstr)
-            else:
+                none_count += 1
+            if none_count == threads:
+                [i.terminate() for i in workers]
+                workers = []
+            elif result is not None:
                 completed += 1
                 if completed % 10 == 0:
                     sys.stderr.write('\r{0:2.2f}% Completed'.format(completed/scan_count*100))
                     sys.stderr.flush()
                     # sys.stderr.write('Processed {0} of {1}...\n'.format(completed, scan_count))
-                res = '{0}\t{1}\n'.format(rawstr, '\t'.join([str(result.get(i[0],'NA')) for i in RESULT_ORDER]))
+                res = '{0}\t{1}\n'.format(filename, '\t'.join([str(result.get(i[0], 'NA')) for i in RESULT_ORDER]))
                 out.write(res)
                 out.flush()
                 if html:
                     html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
                     html_out.flush()
+        reader_in.put(None)
+
+    while workers:
+        try:
+            result = result_queue.get(timeout=0.1)
+        except Empty:
+            continue
+        if result is None:
+            none_count += 1
+        if none_count == threads:
+            [i.terminate() for i in workers]
+            workers = []
+        else:
+            completed += 1
+            if completed % 10 == 0:
+                sys.stderr.write('\r{0:2.2f}% Completed'.format(completed/scan_count*100))
+                sys.stderr.flush()
+                # sys.stderr.write('Processed {0} of {1}...\n'.format(completed, scan_count))
+            res = '{0}\t{1}\n'.format(filename, '\t'.join([str(result.get(i[0], 'NA')) for i in RESULT_ORDER]))
+            out.write(res)
+            out.flush()
+            if html:
+                html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
+                html_out.flush()
 
 
 
