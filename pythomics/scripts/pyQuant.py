@@ -719,7 +719,8 @@ def main():
 
         sys.stderr.write('{0} processed and placed into queue.\n'.format(filename))
 
-        in_queue.put(None)
+        # kill the workers
+        [in_queue.put(None) for i in xrange(threads)]
         none_count = 0
         while workers:
             try:
