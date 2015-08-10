@@ -17,7 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 __author__ = 'Chris Mitchell'
 
-import sys, copy, struct, base64, gzip, operator, decimal
+import sys, copy, struct, base64, gzip, operator, decimal, traceback
 from os import path
 import pythomics.templates as templates
 from pythomics.proteomics.structures import PeptideObject, ScanObject, Chromatogram
@@ -1130,13 +1130,14 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                 continue
             method_label = method.attrib['name']
             masses = {}
-            labels[method_label] = masses
             for mod_info in [etree.fromstring(html_parser.unescape(i.text)) for i in method.iter('Parameter') if 'Modification Version' in i.text]:
                 for aa in mod_info.get('AminoAcids').split(','):
                     try:
                         masses[float(mod_info.get('DeltaMass'))].add(aa)
                     except KeyError:
                         masses[float(mod_info.get('DeltaMass'))] = set([aa])
+            if masses:
+                labels[method_label] = masses
         return labels
 
     def loadChromatogram(self):
@@ -1201,13 +1202,26 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID)"
             self.cur.execute(sql)
         while True:
-            results = self.cur.fetchmany(1000)
-            if not results:
-                break
-            for tup in results:
-                scan = self.parseFullScan(tup, modifications=modifications)
-                scan.spectrumId = tup[3]
-                yield scan
+            # results = self.cur.fetchmany(1000)
+            # if not results:
+            #     break
+            try:
+                tup = self.cur.fetchone()
+            except:
+                sys.stderr.write('Error fetching scan:\n{}\n'.format(traceback.format_exc()))
+            else:
+                while tup is not None:
+                    try:
+                        tup = self.cur.fetchone()
+                        if tup is None:
+                            break
+                        scan = self.parseFullScan(tup, modifications=modifications)
+                        scan.spectrumId = tup[3]
+                        yield scan
+                    except:
+                        sys.stderr.write('Error fetching scan:\n{}\n'.format(traceback.format_exc()))
+                if tup is None:
+                    break
         yield None
 
     def decompressScanInfo(self, scanObj, zip):
