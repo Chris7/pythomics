@@ -115,5 +115,12 @@ class PeptideObject(ScanObject):
     def modifiedMass(self):
         mass = self.mass
         for i in self.mods:
-            mass += float(i[3])
+            mass += float(i[2])
         return mass
+
+    def getTheorMass(self):
+        aa_info = [config.RESIDUE_MASSES[i.upper()] for i in self.peptide]
+        peptide_mass = sum([i[0] for i in aa_info])+config.MODIFICATION_MASSES['h'][0]+config.MODIFICATION_MASSES['oh'][0]
+        modifications = sum([float(i[2]) for i in self.mods])
+        mass = peptide_mass+modifications+float(self.charge)*config.HYDROGEN
+        return mass/float(self.charge)

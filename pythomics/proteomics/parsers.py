@@ -1211,13 +1211,13 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                 sys.stderr.write('Error fetching scan:\n{}\n'.format(traceback.format_exc()))
             else:
                 while tup is not None:
+                    if tup is None:
+                        break
+                    scan = self.parseFullScan(tup, modifications=modifications)
+                    scan.spectrumId = tup[3]
+                    yield scan
                     try:
                         tup = self.cur.fetchone()
-                        if tup is None:
-                            break
-                        scan = self.parseFullScan(tup, modifications=modifications)
-                        scan.spectrumId = tup[3]
-                        yield scan
                     except:
                         sys.stderr.write('Error fetching scan:\n{}\n'.format(traceback.format_exc()))
                 if tup is None:

@@ -198,13 +198,13 @@ def fit_data(data, charge=1.0, peptide=None):
     fitted = fit1*data_max
     return {'fit': fitted, 'residual': res.fun}
 
-def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
+def findMicro(df, pos, ppm=None, start_mz=None, calc_start_mz=None, isotope=0, spacing=0):
     """
         We want to find the boundaries of our isotopic clusters. Basically we search until our gradient
         changes, this assumes it's roughly gaussian and there is little interference
     """
     # find the edges within our tolerance
-    tolerance = 5/1e6 if isotope == 0 else 2/1e6
+    tolerance = ppm/1000000.0
     offset = spacing*isotope
     df_empty_index = df[df==0].index
     right = df_empty_index.searchsorted(df.index[pos])
@@ -220,11 +220,19 @@ def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
     # new logic is nm
     sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs(np.abs(start_mz-v)-offset)/v) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
     fit = True
-    top_mu = sorted_peaks[0][0][1]
-    top_std = sorted_peaks[0][0][2]
-    if not filter(lambda x: x[1]<tolerance, sorted_peaks):# and not (top_mu-1.5*top_std < df.index[pos] < top_mu+1.5*top_std):
+
+    if not filter(lambda x: x[1]<tolerance, sorted_peaks):
         # print df.name, df.index[pos], isotope
-        fit = False
+        # print df.name, tolerance
+        if calc_start_mz is not None:
+            sorted_peaks2 = sorted([(peaks.x[i*3:(i+1)*3], np.abs(np.abs(calc_start_mz-v)-offset)/v) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
+            # print sorted_peaks2
+            if filter(lambda x: x[1]<tolerance, sorted_peaks2):
+                sorted_peaks = sorted_peaks2
+            else:
+                fit = False
+        else:
+            fit = False
 
     peak = sorted_peaks[0][0]
     # interpolate our mean/std to a linear range
@@ -233,12 +241,12 @@ def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
     try:
         mu = mapper(peak[1])
     except:
-        print 'mu', peak, y.index
+        print 'mu', sorted_peaks, peak, y.index
         return {'int': 0}
     try:
         std = mapper(y.index[0]+np.abs(peak[2]))-mapper(y.index[0])
     except:
-        print 'std', peak, y.index
+        print 'std', sorted_peaks, peak, y.index
         return {'int': 0}
     peak_gauss = (peak[0]*y.max(), mu, std)
     peak[0] *= y.max()
@@ -258,7 +266,7 @@ def findMicro(df, pos, ppm=None, start_mz=None, isotope=0, spacing=0):
     #     plt.bar(df.index[pos], df.iloc[pos], width=bar_width, align='center', facecolor='k' if fit else 'g')
     #     ax.get_figure().savefig('acolidebug_{}_{}_{}'.format(df.name, isotope, df.index[pos]), format='png', dpi=100)
     #     print fit, isotope, sorted_peaks, tolerance
-    return {'int': int_val if fit else 0, 'bounds': (left, right), 'params': peak}
+    return {'int': int_val if fit else 0, 'bounds': (left, right), 'params': peak, 'error': sorted_peaks[0][1]}
 
 def gauss(x, amp, mu, std):
     return amp*np.exp(-(x - mu)**2/(2*std**2))
@@ -347,9 +355,9 @@ def findAllPeaks(values, min_dist=0):
                 if variance == 0:
                     # we have a singular peak if variance == 0, so set the variance to half of the x/y spacing
                     if peak_index >= 1:
-                        variance = xdata[peak_index]-xdata[peak_index-1]
+                        variance = np.abs(xdata[peak_index]-xdata[peak_index-1])
                     elif peak_index < len(xdata):
-                        variance = xdata[peak_index+1]-xdata[peak_index]
+                        variance = np.abs(xdata[peak_index+1]-xdata[peak_index])
                     else:
                         # we have only 1 data point, most RT's fall into this width
                         variance = 0.05
@@ -572,8 +580,6 @@ def buildEnvelope(peaks_found=None, isotopes=None, gradient=False, rt_window=Non
     # THis is experimental
     # so is this
     if not df.empty:
-        if silac_label == 'Heavy':
-            pass
         delta_df = pd.rolling_apply(df, 2, lambda x: x[1]/x[0]).fillna(0)
         ndfs = []
         indices = df.index
@@ -642,15 +648,15 @@ def looper(selected=None, df=None, theo=None, index=0, out=None):
         residual = ((theo-vals)**2).sum()
         yield (residual, copy.deepcopy(out))
 
-def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=False,
-                 heavy=False, isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None):
+def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.5, charge=2, debug=False,
+                 heavy=False, isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None, last_precursor=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
     start_mz = start_mz/float(charge) if isotope_offset == 0 else (start_mz+isotope_offset*NEUTRON)/float(charge)
     if max_mz is not None:
         max_mz = max_mz/float(charge)-spacing*0.9 if isotope_offset == 0 else (max_mz+isotope_offset*NEUTRON)/float(charge)
-    tolerance = ppm/1000000.0
-    tolerance2 = ppm2/1000000.0
+    tolerance = precursor_ppm/1000000.0
+    tolerance2 = isotope_ppm/1000000.0
 
     non_empty = df[df>0].dropna()
     non_empty_ind = non_empty.index.searchsorted(start_mz)
@@ -682,10 +688,21 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
     # we reset the isotope_index back to 1 here, so on the subsequent steps we aren't looking
     isotope_index += isotope_offset
     # find the largest intensity within our tolerance
-    start_df = df.iloc[df.index.searchsorted(start-start*tolerance/2):df.index.searchsorted(start+start*tolerance/2),]
+    #start_df = df.iloc[df.index.searchsorted(start-start*tolerance/2):df.index.searchsorted(start+start*tolerance/2),]
     #start = start_df.idxmax()
     # find the com
-    start = findMicro(df, df.index.searchsorted(start_df.idxmax()))['params'][1]
+    start = findMicro(df, df.index.searchsorted(start), ppm=precursor_ppm)
+    # if label == 'Light':
+    #     print df.name, start_mz, start, start['error'] > tolerance, tolerance, last_precursor
+    if 'params' in start:
+        if start['error'] > tolerance:
+            start = last_precursor if last_precursor is not None else start_mz
+        else:
+            start = start['params'][1]
+            #return empty_dict
+        #start = start['params'][1]
+    else:
+        return empty_dict
     start_index = df.index.searchsorted(start)
     # find the largest in our tolerance
     # env_dict[isotope_index] = start_index
@@ -746,7 +763,10 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
             continue
         largest_loc = best_locations[index]
         micro_index = df.index.searchsorted(largest_loc)
-        micro_bounds = findMicro(df, micro_index, ppm=3, start_mz=start, isotope=isotope_index, spacing=spacing)
+        micro_bounds = findMicro(df, micro_index, ppm=isotope_ppm if isotope_index > 0 else precursor_ppm,
+                                 calc_start_mz=start_mz, start_mz=start, isotope=isotope_index, spacing=spacing)
+        # if label == 'Light':
+        #     print df.name, isotope_index, df.index[micro_index], micro_bounds
         # print best_locations[index], df.name, micro_bounds['int']
         # check the deviation of our checked peak from the identified peak
         # this additional logic: micro_check
@@ -763,7 +783,9 @@ def findEnvelope(df, start_mz=None, max_mz=None, ppm=5, ppm2=2, charge=2, debug=
         #     micro_dict[isotope_index] = None
         #     env_dict[isotope_index] = None
         #     ppm_dict[isotope_index] = 0
-    plt.close('all')
+    # plt.close('all')
+    # if label == 'Medium':
+    #     print micro_dict
     # in all cases, the envelope is going to be either monotonically decreasing, or a parabola (-x^2)
     isotope_pattern = [(isotope_index, isotope_dict['int']) for isotope_index, isotope_dict in micro_dict.items()]
     # are we monotonically decreasing?
