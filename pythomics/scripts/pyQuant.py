@@ -37,11 +37,9 @@ from scipy import integrate, optimize
 from scipy.stats import signaltonoise, linregress
 
 from matplotlib.backends.backend_pdf import PdfPages
-from cStringIO import StringIO
 import argparse
-import urllib
-import base64
-import scipy.stats
+from cStringIO import StringIO
+from scipy import integrate
 
 from pythomics.templates import CustomParser
 from pythomics.proteomics.parsers import GuessIterator
@@ -193,7 +191,7 @@ class Worker(Process):
                 except:
                     silac_shifts[mass] = aas
 
-        # @profile
+        # @profile(dump_stats=True, print_stats=20)
         def run_thing(params):
             try:
                 html_images = {}
@@ -266,6 +264,7 @@ class Worker(Process):
                         for precursor_label, precursor_shift in precursors.items():
                             if precursor_label in finished:
                                 continue
+                            measured_precursor = (precursor+precursor_shift)/float(charge)
                             precursor_mass = theor_mass*float(charge)+precursor_shift
                             precursor_mz = precursor_mass/float(charge)
                             theo_mass = theor_mass+precursor_shift/float(charge)
@@ -276,7 +275,7 @@ class Worker(Process):
                             envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max,
                                                           charge=charge, precursor_ppm=self.precursor_ppm, isotope_ppm=self.isotope_ppm, heavy=True,
                                                           theo_dist=theo_dist, label=precursor_label, skip_isotopes=finished_isotopes[precursor_label],
-                                                          last_precursor=last_precursors[delta].get(precursor_label, precursor_mz))
+                                                          last_precursor=last_precursors[delta].get(precursor_label, measured_precursor))
                             peaks_found = data[precursor_label]['peaks']
                             # if precursor_label == 'Light':
                             #     print df.name, envelope['micro_envelopes']
@@ -332,172 +331,178 @@ class Worker(Process):
                     ms_index += delta
                 # bookmark with zeros, do the right end first because pandas will by default append there
                 # print chosen_window
-                combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[-1])+1]] = 0
-                combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[0])-1]] = 0
-                combined_data = combined_data[sorted(combined_data.columns)]
-                # shared_isotopes = set([])
-                rt_window.sort()
-                combined_data = combined_data.sort(axis='index').sort(axis='columns')
-                from scipy.signal import argrelmax, argrelmin
-                from scipy import integrate
-                from scipy.optimize import minimize
-                start_rt = rt_index_map.index[base_rt]
-                quant_vals = defaultdict(dict)
-                isotope_labels = pd.DataFrame(isotope_labels).T
-                fig_map = {}
+                if isotope_labels:
+                    combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[-1])+1]] = 0
+                    combined_data[rt_index_map.index[rt_index_map.index.searchsorted(combined_data.columns[0])-1]] = 0
+                    combined_data = combined_data[sorted(combined_data.columns)]
+                    # shared_isotopes = set([])
+                    rt_window.sort()
+                    combined_data = combined_data.sort(axis='index').sort(axis='columns')
+                    start_rt = rt_index_map.index[base_rt]
+                    quant_vals = defaultdict(dict)
+                    isotope_labels = pd.DataFrame(isotope_labels).T
 
-                if self.html:
-                    fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
-                    fig = plt.figure(figsize=(10, 10))
-                    subplot_rows = len(precursors.keys())+1
-                    subplot_columns = pd.Series(isotope_labels['label']).value_counts().iloc[0]+1
-                    subplot_count = int(len(combined_data)/4+1)
-                    ax = fig.add_subplot(subplot_rows, subplot_columns, 1, projection='3d')
-                    X=combined_data.columns.astype(float).values
-                    Y=combined_data.index.astype(float).values
-                    Z=combined_data.fillna(0).values
-                    # Z/=Z.max()
-                    Xi,Yi = np.meshgrid(X, Y)
-                    ax.plot_wireframe(Yi, Xi, Z, cmap=plt.cm.coolwarm)
+                    fig_map = {}
 
-                combined_peaks = defaultdict(dict)
-                plot_index = {}
-                quan_start = None
-                fig_nums = defaultdict(list)
-                for mz, label in isotope_labels['label'].iteritems():
-                    fig_nums[label].append(mz)
-                labelx = False
-                labely = False
-                ymax = combined_data.max().max()
-                label_fig_row = {v: i+1 for i,v in enumerate(precursors.keys())}
-                for row_num, (index, values) in enumerate(combined_data.iterrows()):
-                    quant_label = isotope_labels.loc[index, 'label']
                     if self.html:
-                        fig_index = label_fig_row.get(quant_label)*subplot_columns+fig_nums[quant_label].index(index)+2
-                        current_row = int(fig_index/subplot_columns+1)
-                        if (fig_index-2)%subplot_columns == 0:
-                            labely = True
-                        if current_row == subplot_rows:
-                            labelx = True
-                        # print quant_label, subplot_rows, subplot_columns, fig_index
-                        fig_map[index] = fig_index
-                        plot_index[index, quant_label] = row_num
+                        fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
+                        fig = plt.figure(figsize=(10, 10))
+                        subplot_rows = len(precursors.keys())+1
+                        subplot_columns = pd.Series(isotope_labels['label']).value_counts().iloc[0]+1
+                        subplot_count = int(len(combined_data)/4+1)
+                        ax = fig.add_subplot(subplot_rows, subplot_columns, 1, projection='3d')
+                        X=combined_data.columns.astype(float).values
+                        Y=combined_data.index.astype(float).values
+                        Z=combined_data.fillna(0).values
+                        # Z/=Z.max()
+                        Xi,Yi = np.meshgrid(X, Y)
+                        ax.plot_wireframe(Yi, Xi, Z, cmap=plt.cm.coolwarm)
 
-                    xdata = values.index.values.astype(float)
-                    ydata = values.fillna(0).values.astype(float)
-                    res, all_peaks = peaks.findAllPeaks(values)
-                    mval = ydata.max()
-                    rt_means = res.x[1::3]
-                    rt_amps = res.x[::3]
-                    rt_vars = res.x[2::3]
-                    combined_peaks[quant_label][index] = [{'mean': i, 'amp': j*mval, 'var': k, 'peak': l, 'total': values.sum()}
-                                                          for i,j,k,l in zip(rt_means, rt_amps, rt_vars, all_peaks)]
-                    if self.html:
-                        ax = fig.add_subplot(subplot_rows, subplot_columns, fig_index)
-                        ax.plot(xdata, ydata, 'bo-', alpha=0.7)
-                        ax.plot(xdata, peaks.gauss_ndim(xdata, *res.x)*mval, color='r')
-                        if labely:
-                            labely = False
-                        else:
-                            ax.set_yticklabels([])
-                        if labelx:
-                            labelx = False
-                            ax.set_xticklabels(['{0:.3f}'.format(i) for i in xdata], rotation=45)
-                        else:
-                            ax.set_xticklabels([])
-                        ax.set_ylim(0,combined_data.max().max())
-                # get two most common peak, pick the closest to our RT
-                # we may need to add a check for a minimal # of in for max distance from the RT as well here.
-                common_peaks = pd.Series([peak['peak'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks]).value_counts()
-                common_peaks = common_peaks.sort_index()
-                tcommon_peaks = common_peaks[common_peaks>=4]
-
-                # combine peaks that are separated by a single scan
-                spillover = {}
-                spillover_peaks = tcommon_peaks.index.to_series().apply(lambda x: np.where(xdata==x)[0][0])
-                spillover_peaks = spillover_peaks.sort_index()
-                spillover = defaultdict(list)
-                for index, value in spillover_peaks.iteritems():
-                    spillover_matches = spillover_peaks==(value+1)
-                    if spillover_matches.any():
-                        spillover[spillover_peaks[spillover_matches].index[0]].extend(spillover.get(index, [index]))
-                    else:
-                        spillover[index].extend([index])
-                new_common = pd.Series(0, index=spillover.keys())
-                for i,v in spillover.iteritems():
-                    new_common[i] += sum([tcommon_peaks[val] for val in v])
-
-                common_peaks = new_common if new_common.any() else common_peaks
-                common_peaks_deltas = sorted([(i, np.abs(i-start_rt)) for i in common_peaks.index], key=operator.itemgetter(1))
-                common_peak = common_peaks_deltas[0][0]
-                common_loc = np.where(xdata==common_peak)[0][0]
-                common_var = pd.Series([peak['var'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks if peak['peak'] == common_peak]).median()
-                for quant_label, quan_values in combined_peaks.items():
-                    for index, values in quan_values.items():
-                        if not values:
-                            continue
-                        rt_values = combined_data.loc[index]
-                        xdata = rt_values.index.values.astype(float)
-                        ydata = rt_values.fillna(0)
-                        closest_rts = sorted([(i, np.abs(i['peak']-common_peak)) for i in values], key=operator.itemgetter(1))[0][0]
-                        # if we move more than a # of ms1 to the dominant peak, update to our known peak
-                        gc = 'k'
-                        peak_loc = np.where(xdata == closest_rts['peak'])[0][0]
-                        mean = closest_rts['mean']
-                        amp = closest_rts['amp']
-                        mean_diff = np.abs(mean-xdata[common_loc])
-                        if len(xdata) >= 3 and (mean_diff > 0.3 or (np.abs(peak_loc-common_loc) > 2 and mean_diff > 0.2)):
-                            mean = common_peak
-                            amp = ydata[common_peak]
-                            gc = 'g'
-                        var_rat = closest_rts['var']/common_var
-                        var = closest_rts['var']
-                        peak_params = (amp,  mean, var)
-                        # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
-                        # gauss beats simps/sumtraps/quadrature/fixed_quad
-                        int_val = integrate.quad(peaks.gauss, xdata[0], xdata[-1], args=peak_params)[0]
-                        isotope_index = isotope_labels.loc[index, 'isotope_index']
-                        if int_val and not pd.isnull(int_val) and gc != 'c':
-                            try:
-                                quant_vals[quant_label][isotope_index] += int_val
-                            except KeyError:
-                                quant_vals[quant_label][isotope_index] =  int_val
-                    #     quant_vals[quant_label] += integrate.simps(ydata*mval, xdata)
+                    combined_peaks = defaultdict(dict)
+                    plot_index = {}
+                    quan_start = None
+                    fig_nums = defaultdict(list)
+                    for mz, label in isotope_labels['label'].iteritems():
+                        fig_nums[label].append(mz)
+                    labelx = False
+                    labely = False
+                    ymax = combined_data.max().max()
+                    label_fig_row = {v: i+1 for i,v in enumerate(precursors.keys())}
+                    for row_num, (index, values) in enumerate(combined_data.iterrows()):
+                        quant_label = isotope_labels.loc[index, 'label']
                         if self.html:
-                            ax = fig.add_subplot(subplot_rows, subplot_columns, fig_map.get(index))
-                            ax.plot(xdata, peaks.gauss(xdata, *peak_params), '{}o-'.format(gc), alpha=0.7)
-                            ax.plot([start_rt, start_rt], ax.get_ylim(),'k-')
-                            # ax.set_ylim(0, amp)
+                            fig_index = label_fig_row.get(quant_label)*subplot_columns+fig_nums[quant_label].index(index)+2
+                            current_row = int(fig_index/subplot_columns+1)
+                            if (fig_index-2)%subplot_columns == 0:
+                                labely = True
+                            if current_row == subplot_rows:
+                                labelx = True
+                            # print quant_label, subplot_rows, subplot_columns, fig_index
+                            fig_map[index] = fig_index
+                            plot_index[index, quant_label] = row_num
 
-                for silac_label1 in data.keys():
-                    qv1 = quant_vals.get(silac_label1)
-                    for silac_label2 in data.keys():
-                        if silac_label1 == silac_label2:
-                            continue
-                        qv2 = quant_vals.get(silac_label2)
-                        ratio = 'NA'
-                        if qv1 is not None and qv2 is not None:
-                            if self.mono:
-                                common_isotopes = set(qv1.keys()).intersection(qv2.keys())
+                        xdata = values.index.values.astype(float)
+                        ydata = values.fillna(0).values.astype(float)
+                        res, all_peaks = peaks.findAllPeaks(values)
+                        mval = ydata.max()
+                        rt_means = res.x[1::3]
+                        rt_amps = res.x[::3]
+                        rt_vars = res.x[2::3]
+                        combined_peaks[quant_label][index] = [{'mean': i, 'amp': j*mval, 'var': k, 'peak': l, 'total': values.sum()}
+                                                              for i,j,k,l in zip(rt_means, rt_amps, rt_vars, all_peaks)]
+                        if self.html:
+                            ax = fig.add_subplot(subplot_rows, subplot_columns, fig_index)
+                            ax.plot(xdata, ydata, 'bo-', alpha=0.7)
+                            ax.plot(xdata, peaks.gauss_ndim(xdata, *res.x)*mval, color='r')
+                            if labely:
+                                labely = False
                             else:
-                                common_isotopes = set(qv1.keys()).union(qv2.keys())
-                            quant1 = sum([qv1.get(i, 0) for i in common_isotopes])
-                            quant2 = sum([qv2.get(i, 0) for i in common_isotopes])
-                            ratio = quant1/quant2 if quant1 and quant2 else 'NA'
-                        result_dict.update({'{}_{}_ratio'.format(silac_label1, silac_label2): ratio})
+                                ax.set_yticklabels([])
+                            if labelx:
+                                labelx = False
+                                ax.set_xticklabels(['{0:.3f}'.format(i) for i in xdata], rotation=45)
+                            else:
+                                ax.set_xticklabels([])
+                            ax.set_ylim(0,combined_data.max().max())
+                    # get two most common peak, pick the closest to our RT
+                    # we may need to add a check for a minimal # of in for max distance from the RT as well here.
+                    common_peaks = pd.Series([peak['peak'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks]).value_counts()
+                    common_peaks = common_peaks.sort_index()
+                    tcommon_peaks = common_peaks[common_peaks>=4]
 
-                if self.html:
-                    plt.tight_layout()
-                    ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=100)
-                    html_images['clusters'] = os.path.join(self.html['rel'], fname)
-                # if self.debug:
-                #     pdf.close()
-                if self.debug or self.html:
-                    plt.close('all')
-                result_dict.update({'html_info': html_images})
+                    # combine peaks that are separated by a single scan
+                    spillover = {}
+                    spillover_peaks = tcommon_peaks.index.to_series().apply(lambda x: np.where(xdata==x)[0][0])
+                    spillover_peaks = spillover_peaks.sort_index()
+                    spillover = defaultdict(list)
+                    for index, value in spillover_peaks.iteritems():
+                        spillover_matches = spillover_peaks==(value+1)
+                        if spillover_matches.any():
+                            spillover[spillover_peaks[spillover_matches].index[0]].extend(spillover.get(index, [index]))
+                        else:
+                            spillover[index].extend([index])
+                    new_common = pd.Series(0, index=spillover.keys())
+                    for i,v in spillover.iteritems():
+                        new_common[i] += sum([tcommon_peaks[val] for val in v])
+
+                    common_peaks = new_common if new_common.any() else common_peaks
+                    common_peaks_deltas = sorted([(i, np.abs(i-start_rt)) for i in common_peaks.index], key=operator.itemgetter(1))
+                    common_peak = common_peaks_deltas[0][0]
+                    common_loc = np.where(xdata==common_peak)[0][0]
+                    common_var = pd.Series([peak['var'] for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks if peak['peak'] == common_peak]).median()
+                    rt_widths = {i: {'amp': -1, 'var': 0} for i in data.keys()}
+                    for quant_label, quan_values in combined_peaks.items():
+                        for index, values in quan_values.items():
+                            if not values:
+                                continue
+                            rt_values = combined_data.loc[index]
+                            xdata = rt_values.index.values.astype(float)
+                            ydata = rt_values.fillna(0)
+                            closest_rts = sorted([(i, np.abs(i['peak']-common_peak)) for i in values], key=operator.itemgetter(1))[0][0]
+                            # if we move more than a # of ms1 to the dominant peak, update to our known peak
+                            gc = 'k'
+                            peak_loc = np.where(xdata == closest_rts['peak'])[0][0]
+                            mean = closest_rts['mean']
+                            amp = closest_rts['amp']
+                            mean_diff = np.abs(mean-xdata[common_loc])
+                            if len(xdata) >= 3 and (mean_diff > 0.3 or (np.abs(peak_loc-common_loc) > 2 and mean_diff > 0.2)):
+                                mean = common_peak
+                                amp = ydata[common_peak]
+                                gc = 'g'
+                            var_rat = closest_rts['var']/common_var
+                            var = closest_rts['var']
+                            peak_params = (amp,  mean, var)
+                            # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
+                            # gauss beats simps/sumtraps/quadrature/fixed_quad
+                            int_val = integrate.quad(peaks.gauss, xdata[0], xdata[-1], args=peak_params)[0]
+                            isotope_index = isotope_labels.loc[index, 'isotope_index']
+                            if int_val and not pd.isnull(int_val) and gc != 'c':
+                                try:
+                                    quant_vals[quant_label][isotope_index] += int_val
+                                except KeyError:
+                                    quant_vals[quant_label][isotope_index] =  int_val
+                            if rt_widths.get(quant_label, {}).get('amp', -1) < amp:
+                                rt_widths[quant_label].update({'amp': amp, 'var': var})
+                        #     quant_vals[quant_label] += integrate.simps(ydata*mval, xdata)
+                            if self.html:
+                                ax = fig.add_subplot(subplot_rows, subplot_columns, fig_map.get(index))
+                                ax.plot(xdata, peaks.gauss(xdata, *peak_params), '{}o-'.format(gc), alpha=0.7)
+                                ax.plot([start_rt, start_rt], ax.get_ylim(),'k-')
+                                # ax.set_ylim(0, amp)
+
+                    for silac_label1 in data.keys():
+                        qv1 = quant_vals.get(silac_label1)
+                        for silac_label2 in data.keys():
+                            if silac_label1 == silac_label2:
+                                continue
+                            qv2 = quant_vals.get(silac_label2)
+                            ratio = 'NA'
+                            if qv1 is not None and qv2 is not None:
+                                if self.mono:
+                                    common_isotopes = set(qv1.keys()).intersection(qv2.keys())
+                                else:
+                                    common_isotopes = set(qv1.keys()).union(qv2.keys())
+                                quant1 = sum([qv1.get(i, 0) for i in common_isotopes])
+                                quant2 = sum([qv2.get(i, 0) for i in common_isotopes])
+                                ratio = quant1/quant2 if quant1 and quant2 else 'NA'
+                            result_dict.update({'{}_{}_ratio'.format(silac_label1, silac_label2): ratio})
+
+                    if self.html:
+                        plt.tight_layout()
+                        ax.get_figure().savefig(os.path.join(self.html['full'], fname), format='png', dpi=100)
+                        html_images['clusters'] = os.path.join(self.html['rel'], fname)
+                    # if self.debug:
+                    #     pdf.close()
+                    if self.debug or self.html:
+                        plt.close('all')
+                    result_dict.update({'html_info': html_images})
+                    for silac_label, silac_data in data.iteritems():
+                        result_dict.update({
+                            '{}_intensity'.format(silac_label): sum([i for i in quant_vals[silac_label].values()]),
+                            '{}_rt_width'.format(silac_label): rt_widths.get(silac_label, {}).get('var', 'NA'),
+                        })
                 for silac_label, silac_data in data.iteritems():
                     result_dict.update({
-                        '{}_intensity'.format(silac_label): sum([i for i in quant_vals[silac_label].values()]),
                         '{}_precursor'.format(silac_label): silac_data['precursor']
                     })
                 self.results.put(result_dict)
@@ -552,13 +557,13 @@ def main():
     labels = silac_labels.keys()
     for silac_label in labels:
         RESULT_ORDER.extend([('{}_intensity'.format(silac_label), '{} Intensity'.format(silac_label)),
-                            ('{}_precursor'.format(silac_label), '{} Precursor'.format(silac_label))])
+                             ('{}_precursor'.format(silac_label), '{} Precursor'.format(silac_label)),
+                             ('{}_rt_width'.format(silac_label), '{} RT Width'.format(silac_label))
+                             ])
         for silac_label2 in labels:
             if silac_label != silac_label2:
                 RESULT_ORDER.extend([('{}_{}_ratio'.format(silac_label, silac_label2),
                                      '{}/{}'.format(silac_label, silac_label2))])
-                RESULT_ORDER.extend([('{}_{}_residual'.format(silac_label, silac_label2),
-                                     '{}/{} residual'.format(silac_label, silac_label2))])
     # ('light_clusters', 'Light Peaks Identified'), ('heavy_clusters', 'Heavy Peaks Identified'), ('light_rt_dev', 'Light Retention Time Deviation'),
     # ('heavy_rt_dev', 'Heavy Retention Time Deviation'), ('light_residuals', 'Light Intensity Residuals of Fit'),
     # ('heavy_residuals', 'Heavy Intensity Residuals of Fit'), ('cluster_ratio_deviation', 'Deviation of Heavy Clusters From Light'),
@@ -796,7 +801,7 @@ def main():
                 out.write(res)
                 out.flush()
                 if html:
-                    html_out.write(table_rows([{'table': res.strip(), 'images': result['html_info']}]))
+                    html_out.write(table_rows([{'table': res.strip(), 'images': result.get('html_info', {})}]))
                     html_out.flush()
         reader_in.put(None)
         del scan_dict
