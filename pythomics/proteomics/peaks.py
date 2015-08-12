@@ -24,6 +24,8 @@ ETNS = {1: {'C': .0110, 'H': 0.00015, 'N': 0.0037, 'O': 0.00038, 'S': 0.0075},
         2: {'O': 0.0020, 'S': .0421},
         4: {'S': 0.00020}}
 
+_epsilon = np.sqrt(np.finfo(float).eps)
+
 def calculate_theoretical_distribution(peptide):
     def dio_solve(n, l=None, index=0, out=None):
         if l is None:
@@ -226,7 +228,6 @@ def findMicro(df, pos, ppm=None, start_mz=None, calc_start_mz=None, isotope=0, s
         # print df.name, tolerance
         if calc_start_mz is not None:
             sorted_peaks2 = sorted([(peaks.x[i*3:(i+1)*3], np.abs(np.abs(calc_start_mz-v)-offset)/v) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
-            # print sorted_peaks2
             if filter(lambda x: x[1]<tolerance, sorted_peaks2):
                 sorted_peaks = sorted_peaks2
             else:
@@ -273,9 +274,9 @@ def gauss(x, amp, mu, std):
 
 def gauss_ndim( xdata, *args):
     amps, mus, sigmas = args[::3], args[1::3], args[2::3]
-    data = pd.Series(0, index=xdata)
+    data = np.zeros(len(xdata))
     for amp, mu, sigma in zip(amps, mus, sigmas):
-        data += pd.Series(gauss(xdata, amp, mu, sigma), index=xdata)
+        data += gauss(xdata, amp, mu, sigma)
     return data
 
 def gauss_func( guess, *args):
@@ -283,7 +284,16 @@ def gauss_func( guess, *args):
     data = gauss_ndim(xdata, *guess)
     # absolute deviation as our distance metric. Empirically found to give better results than
     # residual sum of squares for this data.
-    return sum(np.abs(ydata-data.values)**2)
+    return sum(np.abs(ydata-data)**2)
+
+def gauss_jac( guess, *args):
+    # take partial differentials of each parameter as the jacobian
+    xdata, ydata = args
+    amps, mus, sigmas = guess[::3], guess[1::3], guess[2::3]
+    jac_amps = [np.exp(-(mu)/(2*sigma**2)) for mu, sigma in zip(mus, sigmas)]
+    jac_mus = [amp*np.exp(-(mu)/(2*sigma**2))*((mu)/(sigma**2)) for amp, mu, sigma in zip(amps, mus, sigmas)]
+    jac_sigmas = [amp*np.exp(-(mu)/(2*sigma**2))*((mu)**2/(sigma**3)) for amp, mu, sigma in zip(amps, mus, sigmas)]
+    return [j for i in zip(jac_amps, jac_mus, jac_sigmas) for j in i]
 
 def findAllPeaks(values, min_dist=0):
     xdata = values.index.values.astype(float)
@@ -374,7 +384,7 @@ def findAllPeaks(values, min_dist=0):
             guess = [max(ydata), np.argmax(ydata), variance]
         args = (xdata, ydata)
         opts = {}
-        res = optimize.minimize(gauss_func, guess, args, method='SLSQP', bounds=bnds, options=opts)
+        res = optimize.minimize(gauss_func, guess, args, method='SLSQP', bounds=bnds, options=opts)#, jac=gauss_jac)
         n = len(xdata)
         k = len(res.x)
         bic = n*np.log(res.fun/n)+k+np.log(n)
@@ -665,16 +675,14 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     env_dict, micro_dict, ppm_dict = OrderedDict(),OrderedDict(),OrderedDict()
     empty_dict = {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
     isotope_index = 0
-    while abs(start-start_mz)/start >= tolerance:
+    if abs(start-start_mz)/start >= tolerance:
+        start_mz = last_precursor
         # check if the second peak is present
-        if heavy is False or attempts >= 1:
-            return empty_dict
         start_mz += spacing
         non_empty_ind = non_empty.index.searchsorted(start_mz)
         start = non_empty.index[non_empty_ind]
-        if max_mz is not None and start >= max_mz:
+        if (max_mz is not None and start >= max_mz) or (abs(start-start_mz)/start >= tolerance2):
             return empty_dict
-        attempts += 1
         isotope_index += 1
     # # check behind us for a peak, if we find one taller than us, quit because we're in a contaminant, or we're in a non-modified
     # # version of the peptide
@@ -707,7 +715,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     # find the largest in our tolerance
     # env_dict[isotope_index] = start_index
     valid_locations2 = OrderedDict()
-    valid_locations2[isotope_index] = [(0, start)]#list(start_df.index)
+    valid_locations2[isotope_index] = [(isotope_index, start)]#list(start_df.index)
     tolerance = tolerance2
 
     # micro means return the 'micro envelope' which is the envelope of each isotopic cluster, start with our beginning isotope
