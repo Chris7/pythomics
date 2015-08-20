@@ -49,9 +49,9 @@ def main():
         return 1
     fasta_file = fasta.FastaIterator(file_name)
     if enzyme_pattern:
-        enzyme = digest.Enzyme(pattern=enzyme_pattern)
+        enzymes = [digest.Enzyme(pattern=enzyme_pattern)]
     elif enzyme_choice:
-        enzyme = digest.Enzyme(enzyme=enzyme_choice)
+        enzymes = [digest.Enzyme(enzyme=protease) for protease in enzyme_choice]
     with args.out as o:
         if digest_type == 'nt':
             for header, sequence in fasta_file:
@@ -68,9 +68,12 @@ def main():
                         translation = translation.split('*')
                     for protein_index,protein_sequence in enumerate(translation):
                         if genome:
-                            peptides = enzyme.cleave(protein_sequence, min=0, max=99999, unique=unique_digest)
+                            enzyme_kwargs = {'min': 0, 'max': 999999, 'unique': unique_digest}
                         else:
-                            peptides = enzyme.cleave(protein_sequence, min=digest_min, max=digest_max, unique=unique_digest)
+                            enzyme_kwargs = {'min': digest_min, 'max': digest_max, 'unique': unique_digest}
+                        peptides = enzymes[0].cleave(protein_sequence, **enzyme_kwargs)
+                        for enzyme in enzymes[1:]:
+                            peptides = [sub_seq for peptide_sequence in peptides for sub_seq in enzyme.cleave(peptide_sequence, **enzyme_kwargs)]
                         for peptide_index,peptide in enumerate(peptides):
                             if genome:
                                 if len(peptide)>=digest_min:
@@ -92,9 +95,12 @@ def main():
                             translation = translation.split('*')
                         for protein_index,protein_sequence in enumerate(translation):
                             if genome:
-                                peptides = enzyme.cleave(protein_sequence, min=0, max=999999, unique=unique_digest)
+                                enzyme_kwargs = {'min': 0, 'max': 999999, 'unique': unique_digest}
                             else:
-                                peptides = enzyme.cleave(protein_sequence, min=digest_min, max=digest_max, unique=unique_digest)
+                                enzyme_kwargs = {'min': digest_min, 'max': digest_max, 'unique': unique_digest}
+                            peptides = enzymes[0].cleave(protein_sequence, **enzyme_kwargs)
+                            for enzyme in enzymes[1:]:
+                                peptides = [sub_seq for peptide_sequence in peptides for sub_seq in enzyme.cleave(peptide_sequence, **enzyme_kwargs)]
                             for peptide_index,peptide in enumerate(peptides):
                                 if genome:
                                     if len(peptide)>=digest_min:
@@ -107,7 +113,10 @@ def main():
                                     o.write('>%s F:%s%d Orf:%d Pep:%d \n%s\n' % (header,strand,i+1,protein_index+1,peptide_index+1,peptide))
         else:
             for header, sequence in fasta_file:
-                peptides = enzyme.cleave(sequence, min=digest_min, max=digest_max)
+                enzyme_kwargs = {'min': digest_min, 'max': digest_max, 'unique': unique_digest}
+                peptides = enzymes[0].cleave(sequence, **enzyme_kwargs)
+                for enzyme in enzymes[1:]:
+                    peptides = [sub_seq for peptide_sequence in peptides for sub_seq in enzyme.cleave(peptide_sequence, **enzyme_kwargs)]
                 for peptide_index,peptide in enumerate(peptides):
                     o.write('>%s Pep:%d \n%s\n' % (header,peptide_index+1,peptide))
         
