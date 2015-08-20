@@ -1058,6 +1058,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.cur = self.conn.cursor()
         self.fileMap = {}
         self.sFileMap = {}
+        self.store = store
         try:
             sql = 'select * from fileinfos'
             self.cur.execute(sql)
@@ -1105,7 +1106,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                 sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} and p.SearchEngineRank <= {} {} GROUP BY p.SpectrumID'.format(clvl, srank, self.extra)
             self.cur.execute(sql)
         except sqlite3.OperationalError:
-            sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} {}'.format(clvl, extra)
+            sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} {}'.format(clvl, self.extra)
             self.nrows = self.conn.execute(sql).fetchone()[0]
             #sql = 'select sp.spectrum,p.ConfidenceLevel,p.ConfidenceLevel,p.Sequence,p.PeptideID,pp.ProteinID,p.SpectrumID from spectra sp left join peptides p on (p.SpectrumID=sp.UniqueSpectrumID) left join peptidesproteins pp on (p.PeptideID=pp.PeptideID) where p.PeptideID IS NOT NULL'
             sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} {} GROUP BY p.SpectrumID'.format(clvl, self.extra)
