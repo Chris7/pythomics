@@ -5,6 +5,8 @@ from collections import Counter
 import math
 import itertools
 from scipy.misc import comb
+from scipy.signal import savgol_filter, gauss_spline, spline_filter
+from scipy.ndimage.filters import gaussian_filter1d
 
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -257,7 +259,8 @@ def findMicro(df, pos, ppm=None, start_mz=None, calc_start_mz=None, isotope=0, s
     #if str(df.index[pos]).startswith('418.22071'):
 #        print sorted_peaks
 #        print y, peak, gauss(y.index.values, *peak)
-    int_val = integrate.quad(gauss, -np.inf, np.inf, args=peak_gauss)[0]
+    lr = np.linspace(peak_gauss[1]-peak_gauss[2]*4, peak_gauss[1]+peak_gauss[2]*4, 1000)
+    int_val = integrate.simps(gauss(lr, *peak_gauss), x=lr)#-np.inf, np.inf, args=peak_gauss)[0]
     # if fit is False:
     # if df.index[pos] > 800.9 and df.index[pos] < 800.93:
     #     plt.title('{} - {} - {}'.format(isotope, int_val, sorted_peaks[0][1]))
@@ -295,15 +298,83 @@ def gauss_jac( guess, *args):
     jac_sigmas = [amp*np.exp(-(mu)/(2*sigma**2))*((mu)**2/(sigma**3)) for amp, mu, sigma in zip(amps, mus, sigmas)]
     return [j for i in zip(jac_amps, jac_mus, jac_sigmas) for j in i]
 
-def findAllPeaks(values, min_dist=0):
+def findAllPeaks2(values, min_dist=0, filter=False):
     xdata = values.index.values.astype(float)
     ydata = values.fillna(0).values.astype(float)
-    #from scipy.ndimage.filters import gaussian_filter1d
-    ydata_peaks = ydata#gaussian_filter1d(ydata, 0.25, mode='constant')
+    # ydata_peaks[ydata<ydata.max()*.10] = 0
+    mval = ydata.max()
+    ydata /= ydata.max()
+    ydata_peaks = np.copy(ydata)
+    if filter:
+        if len(ydata) >= 5:
+            ydata_peaks = gaussian_filter1d(ydata_peaks, 1, mode='constant')
+            ydata_peaks[ydata_peaks<0] = 0
+    peaks_found = {}
+    peak_count = 0
+    last_fit = None
+    fit_accuracy = []
+    centers = []
+    run_length = 0
+    while True:
+        peak_count += 1
+        # remove previous peaks, add the top residual peak as a new peak center
+        ydata_new = np.copy(ydata_peaks)
+        if last_fit:
+            ydata_new -= gauss_ndim(xdata, *res.x)
+            guess = res.x.tolist()
+        else:
+            guess = []
+            bnds = []
+        peak_index = ydata_new.argmax()
+        peak_max = ydata_new[peak_index]
+        ydata_new[ydata_new<peak_max*0.63] = 0
+        try:
+            lb = xdata[ydata_new[:peak_index]==0][-1]
+        except:
+            lb = xdata[0]
+        try:
+            rb = xdata[peak_index:][ydata_new[peak_index:]==0][0]
+        except:
+            rb = xdata[-1]
+        # print lb, peak_index, rb
+        bnds.extend([(0, 1), (lb, rb), (0.0001, (rb-lb))])
+        centers.append(xdata[peak_index])
+        guess.extend([peak_max, xdata[peak_index], (rb-lb)/2])
+        args = (xdata, ydata)
+        opts = {'maxiter': 1000}
+        res = optimize.minimize(gauss_func, guess, args, method='SLSQP', options=opts, bounds=bnds)#, jac=gauss_jac)
+        n = len(xdata)
+        k = len(res.x)
+        bic = n*np.log(res.fun/n)+k+np.log(n)
+        res.bic = bic
+        fit_accuracy.append((1, bic, res, copy.deepcopy(centers)))
+        last_fit = True
+        if len(fit_accuracy) >= 2 and fit_accuracy[-2][1] < fit_accuracy[-1][1]:
+            run_length += 1
+            if run_length > 2:
+                break
+        break
+    # we want to maximize our BIC given our definition
+    best_fits = sorted(fit_accuracy, key=itemgetter(1), reverse=True)
+    return best_fits[0][2:]
+
+def findAllPeaks(values, min_dist=0, filter=False):
+    xdata = values.index.values.astype(float)
+    ydata = values.fillna(0).values.astype(float)
+    #from scipy.ndimage.filters import percentile_filter
+    #from scipy.signal import savgol_filter
+    ydata_peaks = ydata#percentile_filter(ydata, 10, size=3)#gaussian_filter1d(ydata, 0.25, mode='constant')
+    if filter:
+        if len(ydata) >= 5:
+            ydata_peaks = gaussian_filter1d(ydata_peaks, 1, mode='constant')
+            # ydata_peaks = savgol_filter(ydata_peaks, 3, 2, mode='constant')
+            if np.any(ydata_peaks<0):
+                ydata_peaks += np.abs(ydata_peaks.min())
+    # ydata_peaks[ydata<ydata.max()*.10] = 0
     mval = ydata.max()
     ydata /= ydata.max()
     peaks_found = {}
-    for peak_width in xrange(1,3):
+    for peak_width in xrange(1,4):
         row_peaks = argrelmax(ydata_peaks, order=peak_width)[0]
         if not row_peaks.any():
             row_peaks = [np.argmax(ydata)]
@@ -313,14 +384,19 @@ def findAllPeaks(values, min_dist=0):
         peaks_found[peak_width] = {'peaks': row_peaks, 'minima': minima}
     # collapse identical orders
     final_peaks = {}
-    for peak_width in xrange(1, 2):
+    for peak_width in xrange(1, 3):
         # we only have 2 items in here so it doesn't need to be generic yet
+        if peak_width == len(peaks_found):
+            final_peaks[peak_width] = peaks_found[peak_width]
+            continue
         smaller_peaks, smaller_minima = peaks_found[peak_width]['peaks'],peaks_found[peak_width]['minima']
         larger_peaks, larger_minima = peaks_found[peak_width+1]['peaks'],peaks_found[peak_width+1]['minima']
         if np.array_equal(smaller_peaks, larger_peaks) and np.array_equal(smaller_minima, larger_minima):
-            final_peaks[peak_width] = peaks_found[peak_width]
+            final_peaks[peak_width+1] = peaks_found[peak_width+1]
+            if peak_width in final_peaks:
+                del final_peaks[peak_width]
         else:
-            final_peaks = peaks_found
+            final_peaks[peak_width] = peaks_found[peak_width]
     fit_accuracy = []
     for peak_width, peak_info in final_peaks.items():
         row_peaks = peak_info['peaks']
@@ -335,7 +411,7 @@ def findAllPeaks(values, min_dist=0):
             peak_min = xdata[0] if peak_min < xdata[0] else peak_min
             peak_max = xdata[-1] if peak_max > xdata[-1] else peak_max
             rel_peak = ydata[peak_index]/sum(ydata[row_peaks])
-            bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, 0.4)])
+            bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, peak_max-peak_min)])
             # find the points around it to estimate the std of the peak
             left = 0
             for i,v in enumerate(minima):
@@ -383,11 +459,12 @@ def findAllPeaks(values, min_dist=0):
                 variance = 0.05
             guess = [max(ydata), np.argmax(ydata), variance]
         args = (xdata, ydata)
-        opts = {}
+        opts = {'maxiter': 1000}
         res = optimize.minimize(gauss_func, guess, args, method='SLSQP', bounds=bnds, options=opts)#, jac=gauss_jac)
         n = len(xdata)
         k = len(res.x)
         bic = n*np.log(res.fun/n)+k+np.log(n)
+        res.bic = bic
         fit_accuracy.append((peak_width, bic, res, xdata[row_peaks]))
     # we want to maximize our BIC given our definition
     best_fits = sorted(fit_accuracy, key=itemgetter(1,0), reverse=True)
@@ -771,6 +848,8 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
             continue
         largest_loc = best_locations[index]
         micro_index = df.index.searchsorted(largest_loc)
+        if micro_index == 0:
+            pass
         micro_bounds = findMicro(df, micro_index, ppm=isotope_ppm if isotope_index > 0 else precursor_ppm,
                                  calc_start_mz=start_mz, start_mz=start, isotope=isotope_index, spacing=spacing)
         # if label == 'Light':
@@ -794,51 +873,138 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     # plt.close('all')
     # if label == 'Medium':
     #     print micro_dict
+    # We cannot use this -- the LC spray sometimes sputters and will trigger this falsely.
     # in all cases, the envelope is going to be either monotonically decreasing, or a parabola (-x^2)
-    isotope_pattern = [(isotope_index, isotope_dict['int']) for isotope_index, isotope_dict in micro_dict.items()]
-    # are we monotonically decreasing?
-    remove = False
-    if len(isotope_pattern) > 2:
-        # check if the 2nd isotope is smaller than the first. This is a classical case looking like:
-        #
-        #  |
-        #  |  |
-        #  |  |  |
-        #  |  |  |  |
-
-        if isotope_pattern[1][1] < isotope_pattern[0][1]:
-            # we are, check this trend holds and remove isotopes it fails for
-            for i,j in zip(isotope_pattern, isotope_pattern[1:]):
-                if j[1] > i[1]:
-                    # the pattern broke, remove isotopes beyond this point
-                    remove = True
-                if remove:
-                    env_dict.pop(j[0])
-                    micro_dict.pop(j[0])
-                    ppm_dict.pop(j[0])
-
-        # check if the 2nd isotope is larger than the first. This is a case looking like:
-        #
-        #
-        #     |  |
-        #     |  |
-        #  |  |  |  |
-
-        elif isotope_pattern[1][1] > isotope_pattern[0][1]:
-            shift = False
-            for i,j in zip(isotope_pattern, isotope_pattern[1:]):
-                if shift and j[1] > i[1]:
-                    remove = True
-                elif shift is False and j[1] < i[1]:
-                    if shift:
-                        remove = True
-                    else:
-                        shift = True
-                if remove:
-                    env_dict.pop(j[0])
-                    micro_dict.pop(j[0])
-                    ppm_dict.pop(j[0])
+    # isotope_pattern = [(isotope_index, isotope_dict['int']) for isotope_index, isotope_dict in micro_dict.items()]
+    # # are we monotonically decreasing?
+    # remove = False
+    # if len(isotope_pattern) > 2:
+    #     # check if the 2nd isotope is smaller than the first. This is a classical case looking like:
+    #     #
+    #     #  |
+    #     #  |  |
+    #     #  |  |  |
+    #     #  |  |  |  |
+    #
+    #     if isotope_pattern[1][1] < isotope_pattern[0][1]:
+    #         # we are, check this trend holds and remove isotopes it fails for
+    #         for i,j in zip(isotope_pattern, isotope_pattern[1:]):
+    #             if j[1] > i[1]:
+    #                 # the pattern broke, remove isotopes beyond this point
+    #                 remove = True
+    #             if remove:
+    #                 env_dict.pop(j[0])
+    #                 micro_dict.pop(j[0])
+    #                 ppm_dict.pop(j[0])
+    #
+    #     # check if the 2nd isotope is larger than the first. This is a case looking like:
+    #     #
+    #     #
+    #     #     |  |
+    #     #     |  |
+    #     #  |  |  |  |
+    #
+    #     elif isotope_pattern[1][1] > isotope_pattern[0][1]:
+    #         shift = False
+    #         for i,j in zip(isotope_pattern, isotope_pattern[1:]):
+    #             if shift and j[1] > i[1]:
+    #                 remove = True
+    #             elif shift is False and j[1] < i[1]:
+    #                 if shift:
+    #                     remove = True
+    #                 else:
+    #                     shift = True
+    #             if remove:
+    #                 env_dict.pop(j[0])
+    #                 micro_dict.pop(j[0])
+    #                 ppm_dict.pop(j[0])
 
     return {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
 
 
+
+
+
+"""
+def bigauss(x, amp, mu, stdl, stdr):
+    sigma1 = stdl/1.177
+    m1 = np.sqrt(2*np.pi)*sigma1*amp
+    sigma2 = stdr/1.177
+    m2 = np.sqrt(2*np.pi)*sigma2*amp
+    #left side
+    if isinstance(x, float):
+        x = np.array([x])
+    lx = x[x<=mu]
+    left = m1/(np.sqrt(2*np.pi)*sigma1)*np.exp(-(lx-mu)**2/(2*sigma1**2))
+    rx = x[x>mu]
+    right = m2/(np.sqrt(2*np.pi)*sigma2)*np.exp(-(rx-mu)**2/(2*sigma2**2))
+    return np.concatenate([left, right], axis=1)
+
+def bigauss_ndim( xdata, *args):
+    amps, mus, sigmasl, sigmasr = args[::4], args[1::4], args[2::4], args[3::4]
+    data = np.zeros(len(xdata))
+    for amp, mu, sigma1, sigma2 in zip(amps, mus, sigmasl, sigmasr):
+        data += bigauss(xdata, amp, mu, sigma1, sigma2)
+    return data
+
+def bigauss_func( guess, *args):
+    xdata, ydata = args
+    data = bigauss_ndim(xdata, *guess)
+    # absolute deviation as our distance metric. Empirically found to give better results than
+    # residual sum of squares for this data.
+    return sum(np.abs(ydata-data)**2)
+
+def gauss_jac( guess, *args):
+    # take partial differentials of each parameter as the jacobian
+    xdata, ydata = args
+    amps, mus, sigmas = guess[::3], guess[1::3], guess[2::3]
+    jac_amps = [np.exp(-(mu)/(2*sigma**2)) for mu, sigma in zip(mus, sigmas)]
+    jac_mus = [amp*np.exp(-(mu)/(2*sigma**2))*((mu)/(sigma**2)) for amp, mu, sigma in zip(amps, mus, sigmas)]
+    jac_sigmas = [amp*np.exp(-(mu)/(2*sigma**2))*((mu)**2/(sigma**3)) for amp, mu, sigma in zip(amps, mus, sigmas)]
+    return [j for i in zip(jac_amps, jac_mus, jac_sigmas) for j in i]
+
+def findAllPeaks(values, min_dist=0):
+    xdata = values.index.values.astype(float)
+    ydata = values.fillna(0).values.astype(float)
+    #from scipy.ndimage.filters import percentile_filter
+    #from scipy.signal import savgol_filter
+    ydata_peaks = ydata#percentile_filter(ydata, 10, size=3)#gaussian_filter1d(ydata, 0.25, mode='constant')
+    # ydata_peaks[ydata<ydata.max()*.10] = 0
+    mval = ydata.max()
+    ydata /= ydata.max()
+    peak_count = 0
+    last_fit = None
+    fit_accuracy = []
+    centers = []
+    while True:
+        peak_count += 1
+        # remove previous peaks, add the top residual as a new peak center
+        ydata_new = np.copy(ydata)
+        if last_fit:
+            ydata_new -= bigauss_ndim(xdata, *res.x)
+            guess = res.x.tolist()
+            bnds = []
+        else:
+            guess = []
+            bnds = []
+        ydata_new[ydata_new<0] = 0
+        peak_index = ydata_new.argmax()
+        peak_max = ydata_new[peak_index]
+        bnds.extend([(0, 1), (peak_max*0.5, peak_max), (0.0001, 0.4), (0.0001, 0.4)])
+        centers.append(xdata[peak_index])
+        guess.extend([ydata_new[peak_index], xdata[peak_index], 0.3, 0.3])
+        args = (xdata, ydata)
+        opts = {}
+        res = optimize.minimize(bigauss_func, guess, args, method='SLSQP', options=opts)#, jac=gauss_jac)
+        n = len(xdata)
+        k = len(res.x)
+        bic = n*np.log(res.fun/n)+k+np.log(n)
+        fit_accuracy.append((1, bic, res, copy.deepcopy(centers)))
+        last_fit = True
+        if len(fit_accuracy) >= 2 and fit_accuracy[-2][1] < fit_accuracy[-1][1]:
+            break
+        break
+    # we want to maximize our BIC given our definition
+    best_fits = sorted(fit_accuracy, key=itemgetter(1,0), reverse=False)
+    return best_fits[0][2:]
+"""
