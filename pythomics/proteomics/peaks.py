@@ -208,7 +208,7 @@ def findMicro(df, pos, ppm=None, start_mz=None, calc_start_mz=None, isotope=0, s
         changes, this assumes it's roughly gaussian and there is little interference
     """
     # find the edges within our tolerance
-    tolerance = ppm/1000000.0
+    tolerance = ppm
     offset = spacing*isotope
     df_empty_index = df[df==0].index
     right = df_empty_index.searchsorted(df.index[pos])
@@ -315,7 +315,8 @@ def findAllPeaks2(values, min_dist=0, filter=False):
     fit_accuracy = []
     centers = []
     run_length = 0
-    while True:
+    peaks_found = len(argrelmax(ydata)[0])+1
+    while peak_count < peaks_found:
         peak_count += 1
         # remove previous peaks, add the top residual peak as a new peak center
         ydata_new = np.copy(ydata_peaks)
@@ -327,7 +328,7 @@ def findAllPeaks2(values, min_dist=0, filter=False):
             bnds = []
         peak_index = ydata_new.argmax()
         peak_max = ydata_new[peak_index]
-        ydata_new[ydata_new<peak_max*0.63] = 0
+        # ydata_new[ydata_new<peak_max*0.37] = 0
         try:
             lb = xdata[ydata_new[:peak_index]==0][-1]
         except:
@@ -349,30 +350,56 @@ def findAllPeaks2(values, min_dist=0, filter=False):
         res.bic = bic
         fit_accuracy.append((1, bic, res, copy.deepcopy(centers)))
         last_fit = True
-        if len(fit_accuracy) >= 2 and fit_accuracy[-2][1] < fit_accuracy[-1][1]:
-            run_length += 1
-            if run_length > 2:
-                break
-        break
     # we want to maximize our BIC given our definition
     best_fits = sorted(fit_accuracy, key=itemgetter(1), reverse=True)
     return best_fits[0][2:]
 
-def findAllPeaks(values, min_dist=0, filter=False):
+def bigauss(x, amp, mu, stdl, stdr):
+    sigma1 = stdl/1.177
+    m1 = np.sqrt(2*np.pi)*sigma1*amp
+    sigma2 = stdr/1.177
+    m2 = np.sqrt(2*np.pi)*sigma2*amp
+    #left side
+    if isinstance(x, float):
+        x = np.array([x])
+    lx = x[x<=mu]
+    left = m1/(np.sqrt(2*np.pi)*sigma1)*np.exp(-(lx-mu)**2/(2*sigma1**2))
+    rx = x[x>mu]
+    right = m2/(np.sqrt(2*np.pi)*sigma2)*np.exp(-(rx-mu)**2/(2*sigma2**2))
+    return np.concatenate([left, right], axis=1)
+
+def bigauss_ndim( xdata, *args):
+    amps, mus, sigmasl, sigmasr = args[::4], args[1::4], args[2::4], args[3::4]
+    data = np.zeros(len(xdata))
+    for amp, mu, sigma1, sigma2 in zip(amps, mus, sigmasl, sigmasr):
+        data += bigauss(xdata, amp, mu, sigma1, sigma2)
+    return data
+
+def bigauss_func( guess, *args):
+    xdata, ydata = args
+    if any([pd.isnull(i) for i in guess]):
+        return np.inf
+    data = bigauss_ndim(xdata, *guess)
+    # absolute deviation as our distance metric. Empirically found to give better results than
+    # residual sum of squares for this data.
+    return sum(np.abs(ydata-data)**2)
+
+def findAllPeaks(values, min_dist=0, filter=False, bigauss_fit=False):
     xdata = values.index.values.astype(float)
     ydata = values.fillna(0).values.astype(float)
     #from scipy.ndimage.filters import percentile_filter
     #from scipy.signal import savgol_filter
-    ydata_peaks = ydata#percentile_filter(ydata, 10, size=3)#gaussian_filter1d(ydata, 0.25, mode='constant')
-    if filter:
-        if len(ydata) >= 5:
-            ydata_peaks = gaussian_filter1d(ydata_peaks, 1, mode='constant')
-            # ydata_peaks = savgol_filter(ydata_peaks, 3, 2, mode='constant')
-            if np.any(ydata_peaks<0):
-                ydata_peaks += np.abs(ydata_peaks.min())
+
     # ydata_peaks[ydata<ydata.max()*.10] = 0
     mval = ydata.max()
     ydata /= ydata.max()
+    ydata_peaks = np.copy(ydata)#percentile_filter(ydata, 10, size=3)#gaussian_filter1d(ydata, 0.25, mode='constant')
+    if filter:
+        if len(ydata) >= 5:
+            # snr = ydata_peaks.mean()/ydata_peaks.std()
+            # print snr
+            ydata_peaks = gaussian_filter1d(ydata_peaks, 3, mode='constant')
+            ydata_peaks[ydata_peaks<0] = 0
     peaks_found = {}
     for peak_width in xrange(1,4):
         row_peaks = argrelmax(ydata_peaks, order=peak_width)[0]
@@ -411,7 +438,10 @@ def findAllPeaks(values, min_dist=0, filter=False):
             peak_min = xdata[0] if peak_min < xdata[0] else peak_min
             peak_max = xdata[-1] if peak_max > xdata[-1] else peak_max
             rel_peak = ydata[peak_index]/sum(ydata[row_peaks])
-            bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, peak_max-peak_min)])
+            if bigauss_fit:
+                bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, (peak_max-peak_min)/2.0), (0.0001, (peak_max-peak_min)/2.0)])
+            else:
+                bnds.extend([(rel_peak, 1), (peak_min, peak_max), (0.0001, (peak_max-peak_min))])
             # find the points around it to estimate the std of the peak
             left = 0
             for i,v in enumerate(minima):
@@ -451,16 +481,28 @@ def findAllPeaks(values, min_dist=0, filter=False):
                 variance = 0.05
                 average = xdata[peak_index]
             if variance is not None:
-                guess.extend([ydata[peak_index], average, variance])
+                if bigauss_fit:
+                    guess.extend([ydata[peak_index], average, variance/2.0, variance/2.0])
+                else:
+                    guess.extend([ydata[peak_index], average, variance])
         if not guess:
             average = np.average(xdata, weights=ydata)
             variance = np.sqrt(np.average((xdata-average)**2, weights=ydata))
             if variance == 0:
                 variance = 0.05
-            guess = [max(ydata), np.argmax(ydata), variance]
+            if bigauss_fit:
+                guess = [max(ydata), np.argmax(ydata), variance/2.0, variance/2.0]
+            else:
+                guess = [max(ydata), np.argmax(ydata), variance]
         args = (xdata, ydata)
         opts = {'maxiter': 1000}
-        res = optimize.minimize(gauss_func, guess, args, method='SLSQP', bounds=bnds, options=opts)#, jac=gauss_jac)
+        fit_func = bigauss_func if bigauss_fit else gauss_func
+        routines = ['SLSQP', 'TNC', 'L-BFGS-B', 'SLSQP']
+        routine = routines.pop()
+        res = optimize.minimize(fit_func, guess, args, method=routine, bounds=bnds, options=opts)#, jac=gauss_jac)
+        while not res.success and routines:
+            routine = routines.pop()
+            res = optimize.minimize(fit_func, guess, args, method=routine, bounds=bnds, options=opts)#, jac=gauss_jac)
         n = len(xdata)
         k = len(res.x)
         bic = n*np.log(res.fun/n)+k+np.log(n)
@@ -735,15 +777,16 @@ def looper(selected=None, df=None, theo=None, index=0, out=None):
         residual = ((theo-vals)**2).sum()
         yield (residual, copy.deepcopy(out))
 
-def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.5, charge=2, debug=False,
+def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.5, isotope_ppms=None, charge=2, debug=False,
                  heavy=False, isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None, last_precursor=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
     start_mz = start_mz/float(charge) if isotope_offset == 0 else (start_mz+isotope_offset*NEUTRON)/float(charge)
     if max_mz is not None:
         max_mz = max_mz/float(charge)-spacing*0.9 if isotope_offset == 0 else (max_mz+isotope_offset*NEUTRON)/float(charge)
-    tolerance = precursor_ppm/1000000.0
-    tolerance2 = isotope_ppm/1000000.0
+    if isotope_ppms is None:
+        isotope_ppms = {}
+    tolerance = isotope_ppms.get(0, precursor_ppm)/1000000.0
 
     non_empty = df[df>0].dropna()
     non_empty_ind = non_empty.index.searchsorted(start_mz)
@@ -758,6 +801,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
         start_mz += spacing
         non_empty_ind = non_empty.index.searchsorted(start_mz)
         start = non_empty.index[non_empty_ind]
+        tolerance2 = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
         if (max_mz is not None and start >= max_mz) or (abs(start-start_mz)/start >= tolerance2):
             return empty_dict
         isotope_index += 1
@@ -776,7 +820,8 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     #start_df = df.iloc[df.index.searchsorted(start-start*tolerance/2):df.index.searchsorted(start+start*tolerance/2),]
     #start = start_df.idxmax()
     # find the com
-    start = findMicro(df, df.index.searchsorted(start), ppm=precursor_ppm)
+    start = findMicro(df, df.index.searchsorted(start), ppm=tolerance, start_mz=start_mz)
+    start_error = start['error']
     # if label == 'Light':
     #     print df.name, start_mz, start, start['error'] > tolerance, tolerance, last_precursor
     if 'params' in start:
@@ -793,7 +838,6 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     # env_dict[isotope_index] = start_index
     valid_locations2 = OrderedDict()
     valid_locations2[isotope_index] = [(isotope_index, start)]#list(start_df.index)
-    tolerance = tolerance2
 
     # micro means return the 'micro envelope' which is the envelope of each isotopic cluster, start with our beginning isotope
     # micro_dict[isotope_index] = findMicro(df, start_index, ppm=ppm)
@@ -803,6 +847,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     df_len = non_empty.shape[0]
     last_displacement = None
     valid_locations = []
+    tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
 
     while pos < df_len:
         # search for the ppm error until it rises again, we select the minima and if this minima is
@@ -822,6 +867,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
             # pick the largest peak within our error tolerance
             valid_locations2[isotope_index] = valid_locations
             isotope_index += 1
+            tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
             offset = spacing*isotope_index
             displacement = abs(abs(start-current_loc)-offset)/current_loc
             valid_locations = []
@@ -850,8 +896,12 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
         micro_index = df.index.searchsorted(largest_loc)
         if micro_index == 0:
             pass
-        micro_bounds = findMicro(df, micro_index, ppm=isotope_ppm if isotope_index > 0 else precursor_ppm,
+        isotope_tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
+        precursor_tolerance = isotope_ppms.get(0, precursor_ppm)/1000000.0
+        micro_bounds = findMicro(df, micro_index, ppm=precursor_tolerance if isotope_index == 0 else isotope_tolerance,
                                  calc_start_mz=start_mz, start_mz=start, isotope=isotope_index, spacing=spacing)
+        if isotope_index == 0:
+            micro_bounds['error'] = start_error
         # if label == 'Light':
         #     print df.name, isotope_index, df.index[micro_index], micro_bounds
         # print best_locations[index], df.name, micro_bounds['int']
@@ -864,7 +914,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
         # if abs(micro_mean-micro_index)<500:
         micro_dict[isotope_index] = micro_bounds
         env_dict[isotope_index] = micro_index
-        ppm_dict[isotope_index] = 0#micro_ppm
+        ppm_dict[isotope_index] = micro_bounds.get('error')#micro_ppm
         # else:
         #     print 'micro failed', micro_index, micro_bounds, df.iloc[micro_bounds[0]:micro_bounds[1]], micro_mean
         #     micro_dict[isotope_index] = None
@@ -873,51 +923,50 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     # plt.close('all')
     # if label == 'Medium':
     #     print micro_dict
-    # We cannot use this -- the LC spray sometimes sputters and will trigger this falsely.
     # in all cases, the envelope is going to be either monotonically decreasing, or a parabola (-x^2)
-    # isotope_pattern = [(isotope_index, isotope_dict['int']) for isotope_index, isotope_dict in micro_dict.items()]
-    # # are we monotonically decreasing?
-    # remove = False
-    # if len(isotope_pattern) > 2:
-    #     # check if the 2nd isotope is smaller than the first. This is a classical case looking like:
-    #     #
-    #     #  |
-    #     #  |  |
-    #     #  |  |  |
-    #     #  |  |  |  |
-    #
-    #     if isotope_pattern[1][1] < isotope_pattern[0][1]:
-    #         # we are, check this trend holds and remove isotopes it fails for
-    #         for i,j in zip(isotope_pattern, isotope_pattern[1:]):
-    #             if j[1] > i[1]:
-    #                 # the pattern broke, remove isotopes beyond this point
-    #                 remove = True
-    #             if remove:
-    #                 env_dict.pop(j[0])
-    #                 micro_dict.pop(j[0])
-    #                 ppm_dict.pop(j[0])
-    #
-    #     # check if the 2nd isotope is larger than the first. This is a case looking like:
-    #     #
-    #     #
-    #     #     |  |
-    #     #     |  |
-    #     #  |  |  |  |
-    #
-    #     elif isotope_pattern[1][1] > isotope_pattern[0][1]:
-    #         shift = False
-    #         for i,j in zip(isotope_pattern, isotope_pattern[1:]):
-    #             if shift and j[1] > i[1]:
-    #                 remove = True
-    #             elif shift is False and j[1] < i[1]:
-    #                 if shift:
-    #                     remove = True
-    #                 else:
-    #                     shift = True
-    #             if remove:
-    #                 env_dict.pop(j[0])
-    #                 micro_dict.pop(j[0])
-    #                 ppm_dict.pop(j[0])
+    isotope_pattern = [(isotope_index, isotope_dict['int']) for isotope_index, isotope_dict in micro_dict.items()]
+    # are we monotonically decreasing?
+    remove = False
+    if len(isotope_pattern) > 2:
+        # check if the 2nd isotope is smaller than the first. This is a classical case looking like:
+        #
+        #  |
+        #  |  |
+        #  |  |  |
+        #  |  |  |  |
+
+        if isotope_pattern[1][1] < isotope_pattern[0][1]:
+            # we are, check this trend holds and remove isotopes it fails for
+            for i,j in zip(isotope_pattern, isotope_pattern[1:]):
+                if j[1]*0.9 > i[1]:
+                    # the pattern broke, remove isotopes beyond this point
+                    remove = True
+                if remove:
+                    env_dict.pop(j[0])
+                    micro_dict.pop(j[0])
+                    ppm_dict.pop(j[0])
+
+        # check if the 2nd isotope is larger than the first. This is a case looking like:
+        #
+        #
+        #     |  |
+        #     |  |
+        #  |  |  |  |
+
+        elif isotope_pattern[1][1] > isotope_pattern[0][1]:
+            shift = False
+            for i,j in zip(isotope_pattern, isotope_pattern[1:]):
+                if shift and j[1]*0.9 > i[1]:
+                    remove = True
+                elif shift is False and j[1] < i[1]*0.9:
+                    if shift:
+                        remove = True
+                    else:
+                        shift = True
+                if remove:
+                    env_dict.pop(j[0])
+                    micro_dict.pop(j[0])
+                    ppm_dict.pop(j[0])
 
     return {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
 
