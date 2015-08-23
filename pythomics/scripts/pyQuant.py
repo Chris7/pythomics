@@ -98,6 +98,7 @@ class Reader(Process):
 
     def run(self):
         for scan_request in iter(self.incoming.get, None):
+            # print scan_request
             thread, scan_id = scan_request
             d = self.scan_dict.get(scan_id)
             if not d:
@@ -264,7 +265,7 @@ class Worker(Process):
                                                       isotope_ppms=self.isotope_ppms if self.fitting_run else None,
                                                       theo_dist=theo_dist, label=precursor_label, skip_isotopes=finished_isotopes[precursor_label],
                                                       last_precursor=last_precursors[delta].get(precursor_label, measured_precursor))
-
+                        # print df.name, precursor_mass, envelope['envelope'], envelope['micro_envelopes'].get(0, {}).get('int'), last_precursors[delta].get(precursor_label, measured_precursor)
                         if not envelope['envelope']:
                             finished.add(precursor_label)
                             continue
@@ -295,8 +296,9 @@ class Worker(Process):
                             combined_data = pd.concat([combined_data, selected], axis=1).fillna(0)
                         del envelope
                         del selected
-
-                if found is False:
+                if found is False or np.abs(ms_index) > 75:
+                    # the 75 check is in case we're in something crazy. We should already have the elution profile of the ion
+                    # of interest, else we're in an LC contaminant that will never end.
                     if delta == -1:
                         delta = 1
                         ms_index=0
