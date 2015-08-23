@@ -9,38 +9,29 @@ description = """
 This will quantify labeled peaks (such as SILAC) in ms1 spectra. It relies solely on the distance between peaks,
  which can correct for errors due to amino acid conversions.
 """
-from guppy import hpy
 import sys
+import csv
 import os
 import copy
 import operator
-from scipy.stats import mode
-import operator
-from pythomics.proteomics import peaks, config
 import traceback
 import pandas as pd
 import numpy as np
 import re
+import random
 from collections import OrderedDict, defaultdict
-from itertools import izip_longest
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from multiprocessing import Process, Queue, Manager, Array
 import ctypes
-import sqlite3
-from scipy.stats import linregress
 try:
     #from profilestats import profile
     from memory_profiler import profile
 except ImportError:
     pass
 from Queue import Empty
-from scipy import integrate, optimize
-from scipy.stats import signaltonoise, linregress
 
-from matplotlib.backends.backend_pdf import PdfPages
 import argparse
-from cStringIO import StringIO
 from scipy import integrate
 
 from pythomics.templates import CustomParser
@@ -82,7 +73,6 @@ tsv_group.add_argument('--charge', help='The column indicating the charge state 
 tsv_group.add_argument('--source', help='The column indicating the raw file the scan is contained in.', default='Raw file')
 tsv_group.add_argument('--label-scheme', help='The file corresponding to the labeling scheme utilized.', type=argparse.FileType('r'))
 
-import random
 
 class Reader(Process):
     def __init__(self, incoming, outgoing, raw_file=None, ms2_ms1_map=None, scan_rt_map=None, rt_index_map=None, scans_loaded=None):
@@ -98,7 +88,6 @@ class Reader(Process):
 
     def run(self):
         for scan_request in iter(self.incoming.get, None):
-            # print scan_request
             thread, scan_id = scan_request
             d = self.scan_dict.get(scan_id)
             if not d:
@@ -161,25 +150,24 @@ class Worker(Process):
         try:
             html_images = {}
             scan_info = params.get('scan_info')
-            ms2_info = params.get('ms2_info')
             scanId = scan_info['id']
-            if not ms2_info:
+            if not scan_info:
                 return
-            ms1 = ms2_info['ms1']
+            ms1 = scan_info['ms1']
             infer = ms1 is None
             if infer:
-                ms1 = ms2_ms1_map.get(int(ms2_info['rawId']))
+                ms1 = ms2_ms1_map.get(int(scan_info['rawId']))
             else:
                 try:
                     ms1 = int(ms1)
                 except AttributeError:
-                    ms1 = ms2_ms1_map.get(int(ms2_info['rawId']))
+                    ms1 = ms2_ms1_map.get(int(scan_info['rawId']))
             rt = scan_info.get('rt', scan_rt_map.get(ms1))
             if not rt:
                 return
             mods = scan_info.get('modifications')
-            charge = int(ms2_info['charge'])
-            precursor = (float(ms2_info['mass'])-config.HYDROGEN)*charge if infer else float(ms2_info['mass'])+config.HYDROGEN*(charge-1)
+            charge = int(scan_info['charge'])
+            precursor = (float(scan_info['mass'])-config.HYDROGEN)*charge if infer else float(scan_info['mass'])+config.HYDROGEN*(charge-1)
             shift = 0
             if mods is None:
                 shift += self.silac_labels.get('label', 0)
@@ -192,7 +180,7 @@ class Worker(Process):
             if shift > 0:
                 precursor -= shift
             theor_mass = scan_info['theor_mass']-shift/float(charge)
-            peptide = ms2_info['peptide']
+            peptide = scan_info['peptide']
             if self.debug:
                 sys.stderr.write('thread {4} on ms {0} {1} {2} {3}\n'.format(ms1, rt, precursor, scan_info, id(self)))
             precursors = {'Light': 0.0}
@@ -238,7 +226,6 @@ class Worker(Process):
             spacing = config.NEUTRON/float(charge)
             isotope_labels = {}
             isotopes_chosen = {}
-            # chosen_window = defaultdict(dict)
             last_precursors = {-1: {}, 1: {}}
             while True:
                 if len(finished) == len(precursors.keys()):
@@ -256,7 +243,6 @@ class Worker(Process):
                         precursor_mass = theor_mass*float(charge)+precursor_shift
                         precursor_mz = precursor_mass/float(charge)
                         theo_mass = theor_mass+precursor_shift/float(charge)
-                        # print precursor_label, precursor_mz, theo_mass
                         data[precursor_label]['precursor'] = precursor_mz
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max if shift_max is not None else None
@@ -265,7 +251,6 @@ class Worker(Process):
                                                       isotope_ppms=self.isotope_ppms if self.fitting_run else None,
                                                       theo_dist=theo_dist, label=precursor_label, skip_isotopes=finished_isotopes[precursor_label],
                                                       last_precursor=last_precursors[delta].get(precursor_label, measured_precursor))
-                        # print df.name, precursor_mass, envelope['envelope'], envelope['micro_envelopes'].get(0, {}).get('int'), last_precursors[delta].get(precursor_label, measured_precursor)
                         if not envelope['envelope']:
                             finished.add(precursor_label)
                             continue
@@ -603,11 +588,11 @@ def main():
                     masses[mass_val] = set(mass_list)
             silac_labels.update({label_name: masses})
 
+    sample = args.sample
+    sys.stderr.write('Loading Scans:\n')
+
     if args.tsv:
         dat = pd.read_table(source, sep='\t')
-
-        sys.stderr.write('Loading Scans:\n')
-        sample = args.sample
 
         peptide_col = args.peptide_col
         ms2_col = args.ms2
@@ -616,7 +601,6 @@ def main():
         charge_col = args.charge
         file_col = args.source
         label_col = args.label
-
         for index, row in enumerate(dat.iterrows()):
             if index%1000 == 0:
                 sys.stderr.write('.')
@@ -647,54 +631,29 @@ def main():
                 raw_files[i[file_col]].append((float(i[rt_col]), d))
             except:
                 raw_files[i[file_col]] = [(float(i[rt_col]), d)]
-
-        # sort by RT so we can minimize our memory footprint by throwing away scans we no longer need
-        for i in raw_files.keys():
-            raw_files[i].sort(key=operator.itemgetter(0))
-            raw_files[i] = [j[1] for j in raw_files[i]]
-
     else:
         results = GuessIterator(source, full=True, store=False, peptide=args.peptide)
-
         if not args.label_scheme:
             silac_labels = {'Light': {0: set([])}}
             silac_labels.update(results.getSILACLabels())
 
-        sys.stderr.write('Loading Scans:\n')
-        sample = args.sample
-        for index, i in enumerate(results):
+        for index, scan in enumerate(results):
             if index%1000 == 0:
                 sys.stderr.write('.')
-            if args.peptide and args.peptide.lower() != i.peptide.lower():
+            if args.peptide and args.peptide.lower() != scan.peptide.lower():
                 continue
             if not args.peptide and (sample != 1.0 and random.random() > sample):
                 continue
-            specId = str(i.rawId)
+            specId = str(scan.rawId)
             if specId in mass_scans:
                 continue
-            mass_scans[specId] = {'id': specId, 'theor_mass': i.getTheorMass(), 'peptide': i.peptide, 'mod_peptide': i.modifiedPeptide, 'rt': i.rt, 'charge': i.charge, 'modifications': i.getModifications()}
-            del i
+            fname = scan.file
+            d = {'id': specId, 'theor_mass': scan.getTheorMass(), 'ms1': scan.ms1_scan.title, 'file': fname,
+                 'peptide': scan.peptide, 'mod_peptide': scan.modifiedPeptide, 'rt': scan.rt, 'charge': scan.charge,
+                 'modifications': scan.getModifications(), 'mass': scan.mass}
+            mass_scans[specId] = d
 
-        for index, scan in enumerate(results.getScans(modifications=False)):
-            if index%1000 == 0:
-                sys.stderr.write('.')
-            if scan is None:
-                break
-            msf_scans[(str(scan.rawId), scan.peptide)] = {'file': scan.file, 'ms1': scan.ms1_scan.title, 'rawId': scan.rawId, 'charge': scan.charge, 'mass': scan.mass, 'peptide': scan.peptide}
-            del scan
-        sys.stderr.write('\nScans loaded.\n')
-
-        raw_files = {}
-
-        sys.stderr.write('Processing retention times.\n')
-        for specId in mass_scans.keys():
-            i = mass_scans[specId]
-            if index%1000 == 0:
-                sys.stderr.write('.')
-            scan = msf_scans.get((specId, i.get('peptide')))
-            if scan is None:
-                continue
-            fname = os.path.splitext(scan.get('file'))[0]
+            fname = os.path.splitext(fname)[0]
             if fname not in scan_filemap:
                 fname = os.path.split(fname)[1]
                 if fname not in scan_filemap:
@@ -702,21 +661,17 @@ def main():
                         continue
                     sys.stderr.write('{0} not found in filemap. Filemap is {1}.'.format(fname, scan_filemap))
                     return 1
-            i['file'] = fname
             try:
-                raw_files[fname].append((float(i.get('rt')), i))
+                raw_files[fname].append((float(d.get('rt')), d))
             except KeyError:
-                raw_files[fname] = [(float(i.get('rt')), i)]
+                raw_files[fname] = [(float(d.get('rt')), d)]
+            del scan
 
-
-        # sort by RT so we can minimize our memory footprint by throwing away scans we no longer need
-        for i in raw_files.keys():
-            raw_files[i].sort(key=operator.itemgetter(0))
-            raw_files[i] = [j[1] for j in raw_files[i]]
-
-        raw_files = manager.dict(raw_files)
-
-        sys.stderr.write('\nRetention times loaded.\n')
+    sys.stderr.write('\nScans loaded.\n')
+    # sort by RT so we can minimize our memory footprint by throwing away scans we no longer need
+    for i in raw_files.keys():
+        raw_files[i].sort(key=operator.itemgetter(0))
+        raw_files[i] = [j[1] for j in raw_files[i]]
 
     raw_files = manager.dict(raw_files)
 
@@ -768,6 +723,7 @@ def main():
             pass
         html = {'full': os.path.join(os.path.split(out_path)[0], os.path.normpath(value)+'_images'),
                 'rel':os.path.normpath(value)+'_images' }
+
         def table_rows(html_list, res=None):
             # each item is a string like a\tb\tc
             if html_list:
@@ -791,6 +747,7 @@ def main():
                     out.append('<td>{0}</td>'.format(i))
             res += '\n'.join(out)+'</tr>'
             return table_rows(html_list, res=res)
+
         if resume:
             html_out = open('{0}.html'.format(out_path), 'ab')
         else:
@@ -820,7 +777,6 @@ def main():
 
     skip_map = set([])
     if resume:
-        import csv
         key = None
         for entry in csv.reader(open(out.name, 'rb'), delimiter='\t'):
             # key is filename, peptide, modifications, charge, ms2 id
@@ -866,77 +822,6 @@ def main():
                         rt_index_map=rt_index_map)
         reader.start()
 
-        # # establish our test parameters first
-        #
-        # for i in xrange(threads):
-        #     worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, silac_labels=silac_labels,
-        #                     debug=args.debug, html=html, mono=not args.spread, precursor_ppm=args.precursor_ppm,
-        #                     isotope_ppm=args.isotope_ppm*5,
-        #                     reader_in=reader_in, reader_out=reader_outs[i], ms2_ms1_map=ms2_ms1_map,
-        #                     scan_rt_map=scan_rt_map, rt_index_map=rt_index_map, scans_loaded=scans_loaded,
-        #                     last_scan_accessed=last_scan_accessed, thread=i, fitting_run=True)
-        #     workers.append(worker)
-        #     worker.start()
-        #
-        # try:
-        #     sampling = random.sample(range(len(raw_scans)), 100)
-        # except ValueError:
-        #     sampling = range(len(raw_scans))
-        #
-        # for scan_index in sampling:
-        #     v = raw_scans[scan_index]
-        #     if resume:
-        #         key = (v.get('file'), v.get('peptide'), v.get('modifications'), v.get('charge'), v.get('id'))
-        #         if key in skip_map:
-        #             completed += 1
-        #             continue
-        #     # if scan_index % 100 != 0:
-        #     #     continue
-        #     params = {}
-        #     params['scan_info'] = v
-        #     ms2_scan = msf_scans.get((v.get('id'), v.get('peptide')))
-        #     params['ms2_info'] = ms2_scan
-        #     in_queue.put(params)
-        # # worker.run()
-        #
-        # sys.stderr.write('{0} processed and placed into queue.\n'.format(filename))
-        #
-        # # kill the workers
-        # [in_queue.put(None) for i in xrange(threads)]
-        # fit_results = []
-        # while workers or result is not None:
-        #     try:
-        #         result = result_queue.get(timeout=0.1)
-        #     except Empty:
-        #         # kill expired workers
-        #         result = None
-        #         to_del = []
-        #         for i, v in enumerate(workers):
-        #             if not v.is_alive():
-        #                 v.terminate()
-        #                 to_del.append(i)
-        #         for i in sorted(to_del, reverse=True):
-        #             del workers[i]
-        #     if result is not None:
-        #         fit_results.append(result)
-        #
-        # # do it for real now
-        # isotope_ppms = {}
-        # for res in fit_results:
-        #     for isotope, isotope_params in res.items():
-        #         error = isotope_params.get('error')
-        #         if isotope_params.get('int') and error and not pd.isnull(error):
-        #             try:
-        #                 isotope_ppms[isotope].append(error)
-        #             except KeyError:
-        #                 isotope_ppms[isotope] = [error]
-        # for i in isotope_ppms.keys():
-        #     ppm_info = pd.Series(isotope_ppms[i])
-        #     med_devs = np.abs(np.log2(ppm_info/ppm_info.median()))
-        #     # remove entries that deviate from the median by > 2
-        #     ppm_info = ppm_info[med_devs<1]
-        #     isotope_ppms[i] = args.isotope_ppm if i != 0 else args.precursor_ppm#(ppm_info.mean()+ppm_info.std()*2)*1e6
-        # print isotope_ppms
         for i in xrange(threads):
             worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, silac_labels=silac_labels,
                             debug=args.debug, html=html, mono=not args.spread, precursor_ppm=args.precursor_ppm,
@@ -955,8 +840,6 @@ def main():
                     continue
             params = {}
             params['scan_info'] = v
-            ms2_scan = msf_scans.get((v.get('id'), v.get('peptide')))
-            params['ms2_info'] = ms2_scan
             in_queue.put(params)
 
         sys.stderr.write('{0} processed and placed into queue.\n'.format(filename))
