@@ -1188,7 +1188,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         scan.spectrumId = specId
         return scan
 
-    def getScans(self, modifications=True, fdr=True):
+    def getScans(self, modifications=False, fdr=True):
         """
         get a random scan
         """
@@ -1331,7 +1331,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             objs.append(scanObj)
         return objs
 
-    def parseFullScan(self, i, modifications=True):
+    def parseFullScan(self, i, modifications=False):
         """
         parses scan info for giving a Spectrum Obj for plotting. takes significantly longer since it has to unzip/parse xml
         """

@@ -564,7 +564,6 @@ def main():
             scan_filemap[os.path.splitext(os.path.split(raw_file)[1])[0]] = os.path.abspath(raw_file)
 
     mass_scans = manager.dict()
-    msf_scans = manager.dict()
     raw_files = {}
 
     if args.label_scheme:
@@ -624,9 +623,10 @@ def main():
             charge = float(i[charge_col])
             if not charge or not peptide:
                 continue
-            d = {'id': specId, 'theor_mass': i[mz_col], 'peptide': peptide, 'mod_peptide': peptide, 'rt': i[rt_col], 'charge': charge, 'modifications': None, 'label': name_mapping.get(i[label_col]) if label_col in i else None}
+            d = {'id': specId, 'theor_mass': i[mz_col], 'peptide': peptide, 'mod_peptide': peptide, 'rt': i[rt_col],
+                 'charge': charge, 'modifications': None, 'label': name_mapping.get(i[label_col]) if label_col in i else None,
+                 'file': fname, 'ms1': None, 'rawId': specId, 'mass': i[mz_col]}
             mass_scans[specId] = d
-            msf_scans[(specId, peptide)] = {'file': fname, 'ms1': None, 'rawId': specId, 'charge': charge, 'mass': i[mz_col], 'peptide': i[peptide_col]}
             try:
                 raw_files[i[file_col]].append((float(i[rt_col]), d))
             except:
