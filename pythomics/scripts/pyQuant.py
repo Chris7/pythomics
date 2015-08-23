@@ -637,9 +637,11 @@ def main():
             silac_labels = {'Light': {0: set([])}}
             silac_labels.update(results.getSILACLabels())
 
-        for index, scan in enumerate(results):
+        for index, scan in enumerate(results.getScans(modifications=False)):
             if index%1000 == 0:
                 sys.stderr.write('.')
+            if scan is None:
+                continue
             if args.peptide and args.peptide.lower() != scan.peptide.lower():
                 continue
             if not args.peptide and (sample != 1.0 and random.random() > sample):

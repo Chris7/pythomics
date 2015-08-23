@@ -1342,6 +1342,14 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             sql = 'select aam.ModificationName,pam.Position,aam.DeltaMass from peptidesaminoacidmodifications pam left join aminoacidmodifications aam on (aam.AminoAcidModificationID=pam.AminoAcidModificationID) where pam.PeptideID=%s'%pid
             for row in self.conn.execute(sql):
                 scanObj.addModification(peptide[row[1]], str(row[1]), str(row[2]), row[0])
+        else:
+            try:
+                mods = self.mods[int(pid)]
+                for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
+                    modEntry = self.modTable[int(modId)]
+                    scanObj.addModification(peptide[int(modPosition)], modPosition, modEntry[1], modEntry[0])
+            except KeyError:
+                pass
         scanObj.peptide = peptide
         if self.decompressScanInfo(scanObj, i[0]):
             return scanObj
