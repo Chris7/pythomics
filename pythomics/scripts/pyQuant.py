@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+#!/usr/bin/env python
 from __future__ import division, unicode_literals
 
 # TODO: Threading for single files. Since much time is spent in fetching m/z records, it may be pointless
@@ -32,6 +33,7 @@ except ImportError:
 from Queue import Empty
 
 import argparse
+from datetime import datetime, timedelta
 from scipy import integrate
 
 from pythomics.templates import CustomParser
@@ -62,6 +64,10 @@ parser.add_argument('--resume', help="Will resume from the last run. Only works 
 parser.add_argument('--sample', help="How much of the data to sample. Enter as a decimal (ie 1.0 for everything, 0.1 for 10%%)", type=float, default=1.0)
 parser.add_argument('--disable-stats', help="Disable confidence statistics on data.", action='store_true')
 parser.add_argument('-o', '--out', nargs='?', help='The prefix for the file output', type=str)
+label_group = parser.add_argument_group("Labeling Information")
+label_subgroup = label_group.add_mutually_exclusive_group()
+label_subgroup.add_argument('--label-scheme', help='The file corresponding to the labeling scheme utilized.', type=argparse.FileType('r'))
+label_subgroup.add_argument('--label-method', help='Predefined labeling schemes to use.', type=str, choices=sorted(config.MS1_SCHEMES.keys()))
 tsv_group = parser.add_argument_group('Tabbed File Input')
 tsv_group.add_argument('--tsv', help='Indicate the procesed argument is a delimited file.', action='store_true')
 tsv_group.add_argument('--label', help='The column indicating the label state of the peptide. If not found, entry assumed to be light variant.', default='Labeling State')
@@ -71,7 +77,6 @@ tsv_group.add_argument('--mz', help='The column indicating the MZ value of the p
 tsv_group.add_argument('--ms2', help='The column indicating the ms2 scan corresponding to the ion.', default='MS/MS Scan Number')
 tsv_group.add_argument('--charge', help='The column indicating the charge state of the ion.', default='Charge')
 tsv_group.add_argument('--source', help='The column indicating the raw file the scan is contained in.', default='Raw file')
-tsv_group.add_argument('--label-scheme', help='The file corresponding to the labeling scheme utilized.', type=argparse.FileType('r'))
 
 
 class Reader(Process):
@@ -84,6 +89,7 @@ class Reader(Process):
         self.rt_index_map = rt_index_map
         self.scan_dict = {}
         self.scans_loaded = scans_loaded
+        self.access_times = {}
         self.raw = raw_file
 
     def run(self):
@@ -99,6 +105,17 @@ class Reader(Process):
                 # the scan has been stored, delete it
                 del scan
             self.outgoing[thread].put(d)
+            now = datetime.now()
+            self.access_times[scan_id] = now
+            # evict scans we have not accessed in over 5 minutes
+            cutoff = now-timedelta(minutes=5)
+            to_delete = []
+            for i,v in self.access_times.items():
+                if v < cutoff:
+                    del self.scan_dict[i]
+                    to_delete.append(i)
+            for i in sorted(to_delete, reverse=True):
+                del self.access_times[i]
         sys.stderr.write('reader done\n')
 
 class Worker(Process):
@@ -563,7 +580,7 @@ def main():
         else:
             scan_filemap[os.path.splitext(os.path.split(raw_file)[1])[0]] = os.path.abspath(raw_file)
 
-    mass_scans = manager.dict()
+    found_scans = {}#set([])
     raw_files = {}
 
     if args.label_scheme:
@@ -586,6 +603,9 @@ def main():
                 except KeyError:
                     masses[mass_val] = set(mass_list)
             silac_labels.update({label_name: masses})
+    if args.label_method:
+        silac_labels = config.MS1_SCHEMES[args.label_method]
+
 
     sample = args.sample
     sys.stderr.write('Loading Scans:\n')
@@ -610,8 +630,6 @@ def main():
             if not args.peptide and (sample != 1.0 and random.random() > sample):
                 continue
             specId = str(i[ms2_col])
-            if specId in mass_scans:
-                continue
             fname = i[file_col]
             if fname not in scan_filemap:
                 fname = os.path.split(fname)[1]
@@ -620,20 +638,23 @@ def main():
                         continue
                     sys.stderr.write('{0} not found in filemap. Filemap is {1}.'.format(fname, scan_filemap))
                     return 1
+            mass_key = (specId, fname)
+            if mass_key in found_scans:
+                continue
             charge = float(i[charge_col])
             if not charge or not peptide:
                 continue
             d = {'id': specId, 'theor_mass': i[mz_col], 'peptide': peptide, 'mod_peptide': peptide, 'rt': i[rt_col],
                  'charge': charge, 'modifications': None, 'label': name_mapping.get(i[label_col]) if label_col in i else None,
                  'file': fname, 'ms1': None, 'rawId': specId, 'mass': i[mz_col]}
-            mass_scans[specId] = d
+            found_scans[mass_key] = d#.add(mass_key)
             try:
                 raw_files[i[file_col]].append((float(i[rt_col]), d))
             except:
                 raw_files[i[file_col]] = [(float(i[rt_col]), d)]
     else:
         results = GuessIterator(source, full=True, store=False, peptide=args.peptide)
-        if not args.label_scheme:
+        if not (args.label_scheme or args.label_method):
             silac_labels = {'Light': {0: set([])}}
             silac_labels.update(results.getSILACLabels())
 
@@ -647,13 +668,18 @@ def main():
             if not args.peptide and (sample != 1.0 and random.random() > sample):
                 continue
             specId = str(scan.rawId)
-            if specId in mass_scans:
-                continue
             fname = scan.file
+            peptide = scan.peptide
+            mass_key = (fname, specId, peptide)
+            if mass_key in found_scans:
+                # print 'repeat of', mass_key, vars(scan)
+                # print found_scans[mass_key]
+                continue
+
             d = {'id': specId, 'theor_mass': scan.getTheorMass(), 'ms1': scan.ms1_scan.title, 'file': fname,
-                 'peptide': scan.peptide, 'mod_peptide': scan.modifiedPeptide, 'rt': scan.rt, 'charge': scan.charge,
+                 'peptide': peptide, 'mod_peptide': scan.modifiedPeptide, 'rt': scan.rt, 'charge': scan.charge,
                  'modifications': scan.getModifications(), 'mass': scan.mass}
-            mass_scans[specId] = d
+            found_scans[mass_key] = d#.add(mass_key)
 
             fname = os.path.splitext(fname)[0]
             if fname not in scan_filemap:
@@ -696,7 +722,8 @@ def main():
     workers = []
     completed = 0
     sys.stderr.write('Beginning SILAC quantification.\n')
-    scan_count = len(mass_scans)
+    scan_count = len(found_scans)
+    print scan_count, 'scans'
     headers = ['Raw File']+[i[1] for i in RESULT_ORDER]
     if resume:
         if not out:
@@ -762,6 +789,21 @@ def main():
                         <title>{0}</title>
                         <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/css/bootstrap.min.css" type="text/css">
                         <link rel="stylesheet" href="http://cdn.datatables.net/1.10.5/css/jquery.dataTables.css" type="text/css">
+                        <style>
+                            html, body {
+                                padding: 0;
+                                margin: 0;
+                                height: 100%;
+                            }
+                            .viewer-panel {
+                                overflow-y: scroll;
+                                display: inline;
+                                min-height: 25%;
+                            }
+                            #raw-table_wrapper {
+                                max-height: 75%;
+                            }
+                        </style>
                     </head>
                     <body>
                         <table id="raw-table" class="table table-striped table-bordered table-hover">
@@ -785,6 +827,9 @@ def main():
             key = (entry[0], entry[1], entry[5], entry[6], entry[8])
             skip_map.add(key)
         skip_map.discard(key)
+
+    all_results = []
+    html_results = []
 
     for filename in raw_files.keys():
         raw_scans = raw_files[filename]
@@ -842,14 +887,13 @@ def main():
                     continue
             params = {}
             params['scan_info'] = v
+            # print params
             in_queue.put(params)
 
         sys.stderr.write('{0} processed and placed into queue.\n'.format(filename))
 
         # kill the workers
         [in_queue.put(None) for i in xrange(threads)]
-        all_results = []
-        html_results = []
         while workers or result is not None:
             try:
                 result = result_queue.get(timeout=0.1)
@@ -868,7 +912,6 @@ def main():
                 if completed % 10 == 0:
                     sys.stderr.write('\r{0:2.2f}% Completed'.format(completed/scan_count*100))
                     sys.stderr.flush()
-                    # sys.stderr.write('Processed {0} of {1}...\n'.format(completed, scan_count))
                 res_list = [filename]+[result.get(i[0], 'NA') for i in RESULT_ORDER]
                 if calc_stats:
                     all_results.append(res_list)
@@ -949,7 +992,7 @@ def main():
                 data.loc[(data[label2_hifp] < 0.10), mixed_confidence] -= 1
                 data.loc[(data[label2_hifp] < 0.10), mixed_confidence] -= 1
 
-        data.to_csv(out.name, sep=str('\t'), index=None)
+        data.to_csv('{}_stats'.format(out.name), sep=str('\t'), index=None)
         if html:
             for index, (row_index, row) in enumerate(data.iterrows()):
                 res = '\t'.join(row.astype(str))
@@ -975,7 +1018,29 @@ def main():
                             "iDisplayLength": 100,
                         });
                         var reload = false;
-                        $('[data-toggle="popover"]').popover({ html : true, container: 'footer', placement: 'bottom' });
+                        var empty_panel = '<div class="viewer-panel col-md-6 col-xs-12"><button class="btn btn-primary new-window">New Window</button><button class="btn btn-primary active-window">Set Active Window</button><button class="btn btn-primary close-window">Close window</button><div class="viewer-content"></div></div>';
+                        $('body').append(empty_panel);
+                        var initPanel = function(){
+                            $('.new-window').click(function(){
+                                $('body').append(empty_panel);
+                                $active_window = $('.viewer-panel').last();
+                                $('.close-window').click(function(){
+                                    $(this).parent('.viewer-panel').remove();
+                                });
+                                $('.active-window').click(function(){
+                                    $active_window = $(this).parent('.viewer-panel');
+                                });
+                                initPanel();
+                            });
+                            var height = window.innerHeight;
+                            $active_window.css('max-height', height-$('#raw-table_wrapper').height()-100);
+                        };
+                        var $active_window = $('.viewer-panel');
+                        initPanel();
+
+                        $('[data-toggle="popover"]').click(function(event){
+                            $active_window.find('.viewer-content').html($(this).data('content'));
+                        });
                         $('#raw-table').on( 'page.dt search.dt init.dt order.dt length.dt', function () {
                         	reload = true;
                         });
@@ -984,15 +1049,6 @@ def main():
                         		$('[data-toggle="popover"]').popover({ html : true, container: 'footer', placement: 'bottom' });
                         		reload = false;
                         	}
-                        });
-                        // from http://stackoverflow.com/questions/20466903/bootstrap-popover-hide-on-click-outside
-                        $(document).on('click', function (e) {
-                            $('[data-toggle=popover]').each(function () {
-                                // hide any open popovers when the anywhere else in the body is clicked
-                                if (!$(this).is(e.target) && $(this).has(e.target).length === 0 && $('.popover').has(e.target).length === 0) {
-                                    $(this).popover('hide');
-                                }
-                            });
                         });
                     });
                 </script>
