@@ -332,7 +332,7 @@ class Worker(Process):
                     isotope_figure = '{2}_{0}_{1}_{3}_isotopes.png'.format(peptide, ms1, self.filename, scanId)
                     isotopes_chosen['RT'] = isotopes_chosen.index.get_level_values('RT')
                     subplots = len(isotopes_chosen.index.get_level_values('RT').drop_duplicates())
-                    fig = plt.figure()
+                    fig = plt.figure(figsize=(len(isotopes_chosen)*3,10))
                     all_x = sorted(isotopes_chosen.index.get_level_values('MZ').drop_duplicates())
                     for counter, (index, row) in enumerate(isotopes_chosen.groupby('RT')):
                         ax = fig.add_subplot(subplots, 1, counter+1)
@@ -349,9 +349,9 @@ class Worker(Process):
                     ax.get_figure().savefig(html_images['isotopes'], format='png', dpi=100)
 
                     fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
-                    fig = plt.figure(figsize=(10, 10))
                     subplot_rows = len(precursors.keys())+1
                     subplot_columns = pd.Series(isotope_labels['label']).value_counts().iloc[0]+1
+                    fig = plt.figure(figsize=(subplot_rows*4, subplot_columns*3))
                     ax = fig.add_subplot(subplot_rows, subplot_columns, 1, projection='3d')
                     X=combined_data.columns.astype(float).values
                     Y=combined_data.index.astype(float).values
@@ -790,19 +790,19 @@ def main():
                         <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/css/bootstrap.min.css" type="text/css">
                         <link rel="stylesheet" href="http://cdn.datatables.net/1.10.5/css/jquery.dataTables.css" type="text/css">
                         <style>
-                            html, body {
+                            html, body {{
                                 padding: 0;
                                 margin: 0;
                                 height: 100%;
-                            }
-                            .viewer-panel {
+                            }}
+                            .viewer-panel {{
                                 overflow-y: scroll;
                                 display: inline;
                                 min-height: 25%;
-                            }
-                            #raw-table_wrapper {
+                            }}
+                            #raw-table_wrapper {{
                                 max-height: 75%;
-                            }
+                            }}
                         </style>
                     </head>
                     <body>
