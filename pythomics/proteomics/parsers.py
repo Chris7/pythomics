@@ -1260,7 +1260,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                     if 'PrecursorInfo' in row:
                         finfo = row.split('"')
                         charge = finfo[3]
-                        smass = finfo[5]
+                        smass = finfo[17]
                         scanObj.charge = charge
                         scanObj.mass = float(smass)
                         stage=2

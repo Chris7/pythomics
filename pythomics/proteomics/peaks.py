@@ -217,12 +217,12 @@ def findMicro(df, pos, ppm=None, start_mz=None, calc_start_mz=None, isotope=0, s
         start_mz = df.index[pos]
 
     # new logic is nm
-    sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], np.abs(np.abs(start_mz-v)-offset)/v) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
+    sorted_peaks = sorted([(peaks.x[i*3:(i+1)*3], get_ppm(start_mz+offset, v)) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
     fit = True
 
     if not filter(lambda x: x[1]<tolerance, sorted_peaks):
         if calc_start_mz is not None:
-            sorted_peaks2 = sorted([(peaks.x[i*3:(i+1)*3], np.abs(np.abs(calc_start_mz-v)-offset)/v) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
+            sorted_peaks2 = sorted([(peaks.x[i*3:(i+1)*3], get_ppm(calc_start_mz+offset, v)) for i,v in enumerate(peaks.x[1::3])], key=lambda x: x[1])
             if filter(lambda x: x[1]<tolerance, sorted_peaks2):
                 sorted_peaks = sorted_peaks2
             else:
@@ -782,13 +782,16 @@ def looper(selected=None, df=None, theo=None, index=0, out=None):
         residual = ((theo-vals)**2).sum()
         yield (residual, copy.deepcopy(out))
 
-def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.5, isotope_ppms=None, charge=2, debug=False,
+def get_ppm(theoretical, observed):
+    return np.abs(float(theoretical)-float(observed))/float(theoretical)
+
+def findEnvelope(df, measured_mz=None, theo_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.5, isotope_ppms=None, charge=2, debug=False,
                  isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None, last_precursor=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
-    start_mz = start_mz/float(charge) if isotope_offset == 0 else (start_mz+isotope_offset*NEUTRON)/float(charge)
+    start_mz = measured_mz if isotope_offset == 0 else measured_mz+isotope_offset*NEUTRON/float(charge)
     if max_mz is not None:
-        max_mz = max_mz/float(charge)-spacing*0.9 if isotope_offset == 0 else (max_mz+isotope_offset*NEUTRON)/float(charge)
+        max_mz = max_mz-spacing*0.9 if isotope_offset == 0 else max_mz+isotope_offset*NEUTRON*0.9/float(charge)
     if isotope_ppms is None:
         isotope_ppms = {}
     tolerance = isotope_ppms.get(0, precursor_ppm)/1000000.0
@@ -800,18 +803,35 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     env_dict, micro_dict, ppm_dict = OrderedDict(),OrderedDict(),OrderedDict()
     empty_dict = {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
     isotope_index = 0
-    if abs(start-start_mz)/start >= tolerance:
-        if isotope_index > 1:
-            return empty_dict
-        start_mz = last_precursor
-        # check if the second peak is present
-        start_mz += spacing
-        non_empty_ind = non_empty.index.searchsorted(start_mz)
+    # This is purposefully verbose to be more explicit
+    while get_ppm(start_mz, start) > tolerance:
+        # let's try using our theoretical mass
+        non_empty_ind = non_empty.index.searchsorted(theo_mz)
         start = non_empty.index[non_empty_ind]
-        tolerance2 = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
-        if (max_mz is not None and start >= max_mz) or (abs(start-start_mz)/start >= tolerance2):
+        if get_ppm(theo_mz, start) > tolerance:
+            # let's check our last boundary
+            if last_precursor is not None:
+                non_empty_ind = non_empty.index.searchsorted(last_precursor)
+                start = non_empty.index[non_empty_ind]
+                if get_ppm(last_precursor, start) > tolerance:
+                    # repeat all of that for the next isotopic index
+                    start_mz += spacing
+                    theo_mz += spacing
+                    last_precursor += spacing
+                    isotope_index += 1
+                else:
+                    start_mz = last_precursor
+                    break
+            else:
+                start_mz += spacing
+                theo_mz += spacing
+                isotope_index += 1
+        else:
+            start_mz = theo_mz
+            break
+        tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
+        if isotope_index == 2 or (max_mz is not None and start >= max_mz):
             return empty_dict
-        isotope_index += 1
 
     # we reset the isotope_index back to 1 here, so on the subsequent steps we aren't looking
     isotope_index += isotope_offset
@@ -847,7 +867,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
                 break
             displacement = last_displacement+tolerance if last_displacement is not None else tolerance*2
         else:
-            displacement = abs(abs(start-current_loc)-offset)/current_loc
+            displacement = get_ppm(start+offset, current_loc)
         if debug:
             print pos, start, current_loc, displacement, last_displacement, displacement > last_displacement, last_displacement < tolerance, isotope_index, offset
         if displacement < tolerance:
@@ -858,7 +878,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
             isotope_index += 1
             tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
             offset = spacing*isotope_index
-            displacement = abs(abs(start-current_loc)-offset)/current_loc
+            displacement = get_ppm(start+offset, current_loc)
             valid_locations = []
         elif last_displacement is not None and displacement > last_displacement and not valid_locations:
             break
@@ -867,7 +887,7 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
 
     #combine any overlapping micro envelopes
     #final_micros = self.merge_list(micro_dict)
-    valid_keys = sorted(set(valid_locations2.keys()).intersection(theo_dist.keys()))
+    valid_keys = sorted(set(valid_locations2.keys()).intersection(theo_dist.keys() if theo_dist is not None else valid_locations2.keys()))
     # This attempts to use a diophantine equation to match the clusters to the theoretical distribution of isotopes
     #valid_vals = [j[1] for i in valid_keys for j in valid_locations2[i]]
     #valid_theor = pd.Series([theo_dist[i] for i in valid_keys])
