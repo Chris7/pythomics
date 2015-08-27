@@ -129,8 +129,9 @@ class CustomParser(argparse.ArgumentParser):
     def add_ms_files(self, help='The corresponding raw mass spectrometry file (ie .raw, .mzml).'):
         self.add_argument('--raw', nargs='?', help=help, type=str)
 
-    def add_processed_ms(self, help='The corresponding processed mass spectrometry files (ie .msf, .dat).'):
-        self.add_argument('--processed', help=help, type=argparse.FileType('r'), required=True)
+    def add_processed_ms(self, group=None, help='The corresponding processed mass spectrometry files (ie .msf, .dat).', required=True):
+        parser = self if group is None else group
+        parser.add_argument('--processed', help=help, type=argparse.FileType('r'), required=required)
 
     def add_column_function(self, argument,
                             help="The column to apply a function to (if you want to combine fields, sum fields, etc.).",

@@ -3,6 +3,7 @@ from operator import itemgetter
 from collections import Counter
 from scipy.misc import comb
 from scipy.ndimage.filters import gaussian_filter1d
+from scipy.signal import savgol_filter
 
 import pandas as pd
 from scipy import integrate
@@ -286,7 +287,7 @@ def findAllPeaks2(values, min_dist=0, filter=False):
     ydata_peaks = np.copy(ydata)
     if filter:
         if len(ydata) >= 5:
-            ydata_peaks = gaussian_filter1d(ydata_peaks, 1, mode='constant')
+            ydata_peaks = gaussian_filter1d(ydata_peaks, 2, mode='constant')
             ydata_peaks[ydata_peaks<0] = 0
     peaks_found = {}
     peak_count = 0
@@ -363,6 +364,89 @@ def bigauss_func( guess, *args):
     # residual sum of squares for this data.
     return sum(np.abs(ydata-data)**2)
 
+def fixedMeanFit(values, peak_index=None, debug=False):
+    xdata = values.index.values.astype(float)
+    ydata = values.fillna(0).values.astype(float)
+
+    ydata /= ydata.max()
+    rel_peak = ydata[peak_index]
+    # ydata = gaussian_filter1d(ydata, 1, mode='constant')
+    # fill the zeros with the average of their left/right
+    # gaussian boost
+    gauss_boost = gaussian_filter1d(ydata, 0.2, mode='constant')
+    ydata_original = np.copy(ydata)
+    for i,v in enumerate(ydata):
+        if v <= gauss_boost[i]:
+            boosted = gauss_boost[i]
+            interp = (ydata_original[i-1]+ydata_original[i+1])/2 if i >= 1 and i < len(ydata)-1 else 0
+            ydata[i] = interp if interp > boosted else boosted
+    # print ydata_original.tolist()
+    peak_left, peak_right = findPeak(gaussian_filter1d(savgol_filter(ydata, 5, 3), 2, mode='constant'), peak_index)
+    peaks = xdata[peak_left:peak_right]
+    peak_min, peak_max = xdata[0], xdata[-1]
+    bnds = [(rel_peak*0.75, 1), (peak_min, peak_max), (0, xdata[peak_index]-peak_min), (0, peak_max-xdata[peak_index])]
+    # reset the fitting data to our bounds
+    if debug:
+        print xdata.tolist(), ydata.tolist(), peak_left, peak_index, peak_right
+    if peak_index == peak_right:
+        peak_index -= peak_left-1
+    else:
+        peak_index -= peak_left
+    xdata = xdata[peak_left:peak_right]
+    ydata = ydata[peak_left:peak_right]
+    # top_indices = ydata>np.percentile(ydata, 80)
+    # print top_indices
+    # ydata = ydata[top_indices]
+    # xdata = xdata[top_indices]
+    # if values.name > 729.36 and values.name < 731:
+    if debug:
+        print xdata.tolist(), ydata.tolist(), peak_left, peak_index, peak_right
+    if ydata.sum() == 0:
+        return None
+    if debug:
+        print peak_left, peak_right, xdata, ydata, values
+    average = np.average(xdata, weights=ydata)
+    variance = np.sqrt(np.average((xdata-average)**2, weights=ydata))
+    if variance == 0:
+        # we have a singular peak if variance == 0, so set the variance to half of the x/y spacing
+        if peak_index >= 1:
+            variance = np.abs(xdata[peak_index]-xdata[peak_index-1])
+        elif peak_index < len(xdata):
+            variance = np.abs(xdata[peak_index+1]-xdata[peak_index])
+        else:
+            # we have only 1 data point, most RT's fall into this width
+            variance = 0.05
+    else:
+        variance = 0.05
+    if variance > xdata[peak_index]-peak_min or variance > peak_max-xdata[peak_index]:
+        variance = xdata[peak_index]-peak_min
+    guess = [rel_peak, xdata[peak_index], variance, variance]
+    # if values.name > 729.36 and values.name < 731:
+    #     print guess, bnds
+    args = (xdata, ydata)
+    opts = {'maxiter': 1000}
+    routines = ['SLSQP', 'TNC', 'L-BFGS-B']
+    routine = routines.pop()
+    results = [optimize.minimize(bigauss_func, guess, args, method=routine, bounds=bnds, options=opts, tol=1e-10)]#, jac=gauss_jac)]
+    # if values.name > 729.36 and values.name < 731:
+    if debug:
+        print results[-1]
+    while not results[-1].success and routines:
+        # if values.name > 729.36 and values.name < 731:
+        if debug:
+            print results[-1]
+        routine = routines.pop()
+        results.append(optimize.minimize(bigauss_func, guess, args, method=routine, bounds=bnds, options=opts))#, jac=gauss_jac)
+    n = len(xdata)
+    if not results[-1].success:
+        res = sorted(results, key=lambda x: x.fun)[0]
+    else:
+        res = results[-1]
+    k = len(res.x)
+    bic = n*np.log(res.fun/n)+k+np.log(n)
+    res.bic = bic
+    return res
+
 def findAllPeaks(values, min_dist=0, filter=False, bigauss_fit=False):
     xdata = values.index.values.astype(float)
     ydata = values.fillna(0).values.astype(float)
@@ -371,6 +455,7 @@ def findAllPeaks(values, min_dist=0, filter=False, bigauss_fit=False):
     ydata_peaks = np.copy(ydata)
     if filter:
         if len(ydata) >= 5:
+            # ydata_peaks = values.replace([0], np.nan).interpolate(method='index').values
             ydata_peaks = gaussian_filter1d(ydata_peaks, 3, mode='constant')
             ydata_peaks[ydata_peaks<0] = 0
     peaks_found = {}
@@ -496,23 +581,21 @@ def merge_list(starting_list):
 
 def findPeak(y, srt):
     # check our SNR, if it's low, lessen our window
-    snr = y.mean()/y.std()
-    y_snr = y.iloc[srt]/y.std()
-    left_offset = 1 if y.iloc[srt] < snr else 2
-    right_offset = 2 if y.iloc[srt] < snr else 3
+    left_offset = 1
+    right_offset = 2
     lsrt = srt-left_offset if srt-left_offset > 0 else 0
     rsrt = srt+right_offset if srt+right_offset < len(y) else len(y)
-    peak = y.iloc[srt]
+    peak = y[srt]
     left = 0
-    grad = y.iloc[lsrt:rsrt].values
+    grad = y[lsrt:rsrt]
     shift = sum(np.sign(np.gradient(grad)))
     shift = 'left' if shift < 0 else 'right'
     ishift = shift
     slope_shifts = 0
     last_slope = -1
     for left in xrange(srt-1, -1, -1):
-        val = y.iloc[left]
-        grad = y.iloc[left-2:left+1]
+        val = y[left]
+        grad = y[left-2:left+1]
         slope = None
         if len(grad) >= 2:
             slope = sum(np.sign(np.gradient(grad)))
@@ -539,8 +622,8 @@ def findPeak(y, srt):
     slope_shifts = 0
     last_slope = -1
     for right in xrange(srt+1, len(y)):
-        val = y.iloc[right]
-        grad = y.iloc[right:right+3]
+        val = y[right]
+        grad = y[right:right+3]
         slope = None
         if len(grad) >= 2:
             slope = sum(np.sign(np.gradient(grad)))
@@ -700,7 +783,7 @@ def looper(selected=None, df=None, theo=None, index=0, out=None):
         yield (residual, copy.deepcopy(out))
 
 def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.5, isotope_ppms=None, charge=2, debug=False,
-                 heavy=False, isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None, last_precursor=None):
+                 isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None, last_precursor=None):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
     start_mz = start_mz/float(charge) if isotope_offset == 0 else (start_mz+isotope_offset*NEUTRON)/float(charge)
@@ -718,6 +801,8 @@ def findEnvelope(df, start_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.
     empty_dict = {'envelope': env_dict, 'micro_envelopes': micro_dict, 'ppms': ppm_dict}
     isotope_index = 0
     if abs(start-start_mz)/start >= tolerance:
+        if isotope_index > 1:
+            return empty_dict
         start_mz = last_precursor
         # check if the second peak is present
         start_mz += spacing

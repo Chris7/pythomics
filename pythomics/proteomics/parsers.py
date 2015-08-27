@@ -1095,7 +1095,9 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.mods = {}
         for i in self.cur.fetchall():
             self.mods[i[0]] = i[1:]
-        self.extra = 'and p.Sequence == "{}"'.format(peptide) if peptide is not None else ''
+        if peptide is not None and not isinstance(peptide, list):
+            peptide = [peptide]
+        self.extra = 'and p.Sequence IN ({})'.format(','.join(['"{}"'.format(i) for i in peptide])) if peptide is not None else ''
         try:
             sql = 'select COUNT(distinct p.SpectrumID) from peptides p where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} and p.SearchEngineRank <= {} {}'.format(clvl,srank, self.extra)
             self.nrows = self.conn.execute(sql).fetchone()[0]

@@ -45,29 +45,26 @@ RESULT_ORDER = [('peptide', 'Peptide'), ('modifications', 'Modifications'),
 
 
 parser = CustomParser(description=description)
-parser.add_processed_ms()
-parser.add_argument('--mzml', help="The mzML files for the raw data. If not provided, raw files assumed to be in the directory of the processed file.", type=argparse.FileType('r'), nargs='*')
-parser.add_argument('--raw-dir', help="The directory containing raw data.", type=str)
+raw_group = parser.add_argument_group("Raw Data Parameters")
+raw_group.add_argument('--mzml', help="The mzML files for the raw data. If not provided, raw files assumed to be in the directory of the processed file.", type=argparse.FileType('r'), nargs='*')
+raw_group.add_argument('--raw-dir', help="The directory containing raw data.", type=str)
+raw_group.add_argument('--precision', help="The precision for storing m/z values. Defaults to 6 decimal places.", type=int, default=6)
+raw_group.add_argument('--precursor-ppm', help="The mass accuracy for the first monoisotopic peak in ppm.", type=float, default=5)
+raw_group.add_argument('--isotope-ppm', help="The mass accuracy for the isotopic cluster.", type=float, default=2.5)
+raw_group.add_argument('--spread', help="Assume there is spread of the isotopic label.", action='store_true')
 
-parser.add_argument('--filemap', help="By default, the mzML file is assumed to be a derivation of the scan filename. " \
+search_group = parser.add_argument_group("Search Information")
+parser.add_processed_ms(group=search_group, required=False)
+search_group.add_argument('--filemap', help="By default, the mzML file is assumed to be a derivation of the scan filename. " \
                                      "If this is not true, this file provides a correct mapping.")
-parser.add_argument('--rt-width', help="The width of the retention time window to search for. Default: 1.0 minute", type=float, default=1.0)
-parser.add_argument('--precision', help="The precision for storing m/z values. Defaults to 6 decimal places.", type=int, default=6)
-parser.add_argument('--precursor-ppm', help="The mass accuracy for the first monoisotopic peak in ppm.", type=float, default=5)
-parser.add_argument('--isotope-ppm', help="The mass accuracy for the isotopic cluster.", type=float, default=2.5)
-parser.add_argument('--spread', help="Assume there is spread of the isotopic label.", action='store_true')
-parser.add_argument('--debug', help="This will output debug information and graphs.", action='store_true')
-parser.add_argument('--skip', help="If true, skip scans with missing files in the mapping.", action='store_true')
-parser.add_argument('--peptide', help="The peptide to limit quantification to.", type=str)
-parser.add_argument('--html', help="Output a HTML table summary.", action='store_true')
-parser.add_argument('--resume', help="Will resume from the last run. Only works if not directing output to stdout.", action='store_true')
-parser.add_argument('--sample', help="How much of the data to sample. Enter as a decimal (ie 1.0 for everything, 0.1 for 10%%)", type=float, default=1.0)
-parser.add_argument('--disable-stats', help="Disable confidence statistics on data.", action='store_true')
-parser.add_argument('-o', '--out', nargs='?', help='The prefix for the file output', type=str)
+search_group.add_argument('--skip', help="If true, skip scans with missing files in the mapping.", action='store_true')
+search_group.add_argument('--peptide', help="The peptide(s) to limit quantification to.", type=str, nargs='*')
+
 label_group = parser.add_argument_group("Labeling Information")
 label_subgroup = label_group.add_mutually_exclusive_group()
 label_subgroup.add_argument('--label-scheme', help='The file corresponding to the labeling scheme utilized.', type=argparse.FileType('r'))
 label_subgroup.add_argument('--label-method', help='Predefined labeling schemes to use.', type=str, choices=sorted(config.MS1_SCHEMES.keys()))
+
 tsv_group = parser.add_argument_group('Tabbed File Input')
 tsv_group.add_argument('--tsv', help='Indicate the procesed argument is a delimited file.', action='store_true')
 tsv_group.add_argument('--label', help='The column indicating the label state of the peptide. If not found, entry assumed to be light variant.', default='Labeling State')
@@ -77,6 +74,18 @@ tsv_group.add_argument('--mz', help='The column indicating the MZ value of the p
 tsv_group.add_argument('--ms2', help='The column indicating the ms2 scan corresponding to the ion.', default='MS/MS Scan Number')
 tsv_group.add_argument('--charge', help='The column indicating the charge state of the ion.', default='Charge')
 tsv_group.add_argument('--source', help='The column indicating the raw file the scan is contained in.', default='Raw file')
+
+ion_search_group = parser.add_argument_group('Ion Search')
+ion_search_group.add_argument('--ms2-ion', help='M/Z values to search for in the ms2 fragmentation data.', nargs='+')
+ion_search_group.add_argument('--ms1-ion', help='M/Z values to search for in ms data.', nargs='+')
+
+output_group = parser.add_argument_group("Output Options")
+output_group.add_argument('--debug', help="This will output debug information and graphs.", action='store_true')
+output_group.add_argument('--html', help="Output a HTML table summary.", action='store_true')
+output_group.add_argument('--resume', help="Will resume from the last run. Only works if not directing output to stdout.", action='store_true')
+output_group.add_argument('--sample', help="How much of the data to sample. Enter as a decimal (ie 1.0 for everything, 0.1 for 10%%)", type=float, default=1.0)
+output_group.add_argument('--disable-stats', help="Disable confidence statistics on data.", action='store_true')
+output_group.add_argument('-o', '--out', nargs='?', help='The prefix for the file output', type=str)
 
 
 class Reader(Process):
@@ -137,7 +146,6 @@ class Worker(Process):
         self.shifts.update({sum(silac_masses.keys()): silac_label for silac_label, silac_masses in self.silac_labels.iteritems()})
         self.raw_name = raw_name
         self.filename = os.path.split(self.raw_name)[1]
-        self.rt_width = 1
         self.rt_tol = 0.2 # for fitting
         self.debug = debug
         self.html = html
@@ -200,6 +208,7 @@ class Worker(Process):
             peptide = scan_info['peptide']
             if self.debug:
                 sys.stderr.write('thread {4} on ms {0} {1} {2} {3}\n'.format(ms1, rt, precursor, scan_info, id(self)))
+            self.debug = ms1 == 9695
             precursors = {'Light': 0.0}
             silac_dict = {'data': None, 'df': pd.DataFrame(), 'precursor': 'NA',
                           'isotopes': {}, 'peaks': OrderedDict(), 'intensity': 'NA'}
@@ -264,7 +273,7 @@ class Worker(Process):
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max if shift_max is not None else None
                         envelope = peaks.findEnvelope(df, start_mz=precursor_mass, max_mz=shift_max,
-                                                      charge=charge, precursor_ppm=self.precursor_ppm, isotope_ppm=self.isotope_ppm, heavy=True,
+                                                      charge=charge, precursor_ppm=self.precursor_ppm, isotope_ppm=self.isotope_ppm,
                                                       isotope_ppms=self.isotope_ppms if self.fitting_run else None,
                                                       theo_dist=theo_dist, label=precursor_label, skip_isotopes=finished_isotopes[precursor_label],
                                                       last_precursor=last_precursors[delta].get(precursor_label, measured_precursor))
@@ -332,7 +341,7 @@ class Worker(Process):
                     isotope_figure = '{2}_{0}_{1}_{3}_isotopes.png'.format(peptide, ms1, self.filename, scanId)
                     isotopes_chosen['RT'] = isotopes_chosen.index.get_level_values('RT')
                     subplots = len(isotopes_chosen.index.get_level_values('RT').drop_duplicates())
-                    fig = plt.figure(figsize=(len(isotopes_chosen)*3,10))
+                    fig = plt.figure(figsize=(10, subplots*3 if subplots*3 < 300 else 300))
                     all_x = sorted(isotopes_chosen.index.get_level_values('MZ').drop_duplicates())
                     for counter, (index, row) in enumerate(isotopes_chosen.groupby('RT')):
                         ax = fig.add_subplot(subplots, 1, counter+1)
@@ -351,7 +360,7 @@ class Worker(Process):
                     fname = '{2}_{0}_{1}_{3}_clusters.png'.format(peptide, ms1, self.filename, scanId)
                     subplot_rows = len(precursors.keys())+1
                     subplot_columns = pd.Series(isotope_labels['label']).value_counts().iloc[0]+1
-                    fig = plt.figure(figsize=(subplot_rows*4, subplot_columns*3))
+                    fig = plt.figure(figsize=(subplot_columns*3 if subplot_columns*3 < 300 else 300, subplot_rows*4 if subplot_rows*4 < 300 else 300))
                     ax = fig.add_subplot(subplot_rows, subplot_columns, 1, projection='3d')
                     X=combined_data.columns.astype(float).values
                     Y=combined_data.index.astype(float).values
@@ -434,6 +443,7 @@ class Worker(Process):
                 common_peaks = new_common if new_common.any() else common_peaks
                 common_peaks_deltas = sorted([(i, np.abs(i-start_rt)) for i in common_peaks.index], key=operator.itemgetter(1))
                 common_peak = common_peaks_deltas[0][0]
+                common_peak_info = [peak for i, values in combined_peaks.items() for index, value_peaks in values.iteritems() for peak in value_peaks if peak['peak'] == common_peak]
                 common_loc = np.where(xdata==common_peak)[0][0]
                 peak_info = {i: {'amp': -1, 'var': 0} for i in data.keys()}
                 for quant_label, quan_values in combined_peaks.items():
@@ -447,22 +457,28 @@ class Worker(Process):
                         # closest_rts = sorted([(i, i['amp']) for i in values if np.abs(i['peak']-common_peak) < 0.2], key=operator.itemgetter(1), reverse=True)
                         # if not closest_rts:
                         closest_rts = sorted([(i, np.abs(i['peak']-common_peak)) for i in values], key=operator.itemgetter(1))
-                        closest_rts = closest_rts[0][0]
+                        closest_rt = closest_rts[0][0]
                         # if we move more than a # of ms1 to the dominant peak, update to our known peak
                         gc = 'k'
-                        peak_loc = np.where(xdata == closest_rts['peak'])[0][0]
-                        mean = closest_rts['mean']
-                        amp = closest_rts['amp']
-                        mean_diff = np.abs(mean-xdata[common_loc])
-                        if quant_label == 'Light':
-                            pass
-                        if len(xdata) >= 3 and (mean_diff > 0.3 or (np.abs(peak_loc-common_loc) > 2 and mean_diff > 0.2)):
-                            mean = common_peak
-                            amp = ydata[common_peak]
+                        peak_loc = np.where(xdata == closest_rt['peak'])[0][0]
+                        mean = closest_rt['mean']
+                        amp = closest_rt['amp']
+                        mean_diff = mean-xdata[common_loc]
+                        mean_diff = np.abs(mean_diff/closest_rt['std'] if mean_diff < 0 else mean_diff/closest_rt['std2'])
+                        std = closest_rt['std']
+                        std2 = closest_rt['std2']
+                        if len(xdata) >= 3 and (mean_diff > 2 or (np.abs(peak_loc-common_loc) > 2 and mean_diff > 2)):
+                            # fixed mean fit
+                            if self.debug:
+                                print quant_label, index
+                                print common_loc, peak_loc
+                            res = peaks.fixedMeanFit(rt_values, peak_index=common_loc-1, debug=self.debug)
+                            if res is None:
+                                continue
+                            amp, mean, std, std2 = res.x
+                            amp *= ydata.max()
                             gc = 'g'
-                        #var_rat = closest_rts['var']/common_var
-                        std = closest_rts['std']
-                        std2 = closest_rts['std2']
+                        #var_rat = closest_rt['var']/common_var
                         peak_params = (amp,  mean, std, std2)
                         # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
                         left, right = xdata[0]-4*std, xdata[-1]+4*std2
@@ -553,7 +569,7 @@ class Worker(Process):
 
 def main():
     args = parser.parse_args()
-    source = args.processed.name
+    source = args.processed.name if args.processed else None
     threads = args.p
     skip = args.skip
     out = args.out
@@ -625,7 +641,7 @@ def main():
                 sys.stderr.write('.')
             row_index, i = row
             peptide = i[peptide_col].strip()
-            if args.peptide and args.peptide.lower() != peptide.lower():
+            if args.peptide and not any([j.lower() == peptide.lower() for j in args.peptide]):
                 continue
             if not args.peptide and (sample != 1.0 and random.random() > sample):
                 continue
@@ -652,7 +668,7 @@ def main():
                 raw_files[i[file_col]].append((float(i[rt_col]), d))
             except:
                 raw_files[i[file_col]] = [(float(i[rt_col]), d)]
-    else:
+    elif source:
         results = GuessIterator(source, full=True, store=False, peptide=args.peptide)
         if not (args.label_scheme or args.label_method):
             silac_labels = {'Light': {0: set([])}}
@@ -663,13 +679,13 @@ def main():
                 sys.stderr.write('.')
             if scan is None:
                 continue
-            if args.peptide and args.peptide.lower() != scan.peptide.lower():
+            peptide = scan.peptide
+            if args.peptide and not any([j.lower() == peptide.lower() for j in args.peptide]):
                 continue
             if not args.peptide and (sample != 1.0 and random.random() > sample):
                 continue
             specId = str(scan.rawId)
             fname = scan.file
-            peptide = scan.peptide
             mass_key = (fname, specId, peptide)
             if mass_key in found_scans:
                 # print 'repeat of', mass_key, vars(scan)
@@ -694,6 +710,12 @@ def main():
             except KeyError:
                 raw_files[fname] = [(float(d.get('rt')), d)]
             del scan
+    elif scan_filemap:
+        # determine if we want to do ms1 ion detection, ms2 ion detection, all ms2 of each file
+        pass
+    else:
+        sys.stderr.write('No valid input entered. PyQuant requires at least a raw file or a processed dataset.')
+        return 1
 
     sys.stderr.write('\nScans loaded.\n')
     # sort by RT so we can minimize our memory footprint by throwing away scans we no longer need
@@ -795,17 +817,21 @@ def main():
                                 margin: 0;
                                 height: 100%;
                             }}
+                            .quant-table, .viewer-panel {{
+                                min-height: 50%;
+                                max-height: 50%;
+                                height: 50%;
+                            }}
                             .viewer-panel {{
                                 overflow-y: scroll;
                                 display: inline;
-                                min-height: 25%;
                             }}
                             #raw-table_wrapper {{
-                                max-height: 75%;
                             }}
                         </style>
                     </head>
                     <body>
+                        <div class="quant-table">
                         <table id="raw-table" class="table table-striped table-bordered table-hover">
                             <thead>
                                 <tr>
@@ -1007,6 +1033,7 @@ def main():
                 """
                         </tbody>
                     </table>
+                  </div>
                 </body>
                 <footer></footer>
                 <script type="text/javascript" src="http://code.jquery.com/jquery-1.11.1.min.js"></script>
@@ -1016,16 +1043,28 @@ def main():
                     $(document).ready(function() {
                         $('#raw-table').DataTable({
                             "iDisplayLength": 100,
+                            "sScrollY": $(window).height()*0.4,
+                            "sScrollX": $(window).width(),
+                            "scrollCollapse": true,
+                            "bJQueryUI": true
                         });
                         var reload = false;
-                        var empty_panel = '<div class="viewer-panel col-md-6 col-xs-12"><button class="btn btn-primary new-window">New Window</button><button class="btn btn-primary active-window">Set Active Window</button><button class="btn btn-primary close-window">Close window</button><div class="viewer-content"></div></div>';
+                        var empty_panel = '<div class="viewer-panel col-xs-12"><button class="btn btn-primary new-window">New Window</button><button class="btn btn-primary active-window">Set Active Window</button><button class="btn btn-primary close-window">Close window</button><div class="viewer-content"></div></div>';
                         $('body').append(empty_panel);
                         var initPanel = function(){
-                            $('.new-window').click(function(){
+                            $('.new-window').last().click(function(){
                                 $('body').append(empty_panel);
-                                $active_window = $('.viewer-panel').last();
+                                var $panels = $('.viewer-panel');
+                                $active_window = $panels.last();
+                                if($panels.length>1)
+                                    $panels.addClass('col-md-6');
+                                else
+                                    $panels.removeClass('col-md-6');
                                 $('.close-window').click(function(){
-                                    $(this).parent('.viewer-panel').remove();
+                                    if($panels.length != 1)
+                                        $(this).parent('.viewer-panel').remove();
+                                    else
+                                        $panels.removeClass('col-md-6');
                                 });
                                 $('.active-window').click(function(){
                                     $active_window = $(this).parent('.viewer-panel');
@@ -1033,20 +1072,23 @@ def main():
                                 initPanel();
                             });
                             var height = window.innerHeight;
-                            $active_window.css('max-height', height-$('#raw-table_wrapper').height()-100);
+                            $active_window.css('height', $(window).height()*0.5);
                         };
                         var $active_window = $('.viewer-panel');
                         initPanel();
 
-                        $('[data-toggle="popover"]').click(function(event){
-                            $active_window.find('.viewer-content').html($(this).data('content'));
-                        });
+                        var initDataViewer = function(){
+                            $('[data-toggle="popover"]').click(function(event){
+                                $active_window.find('.viewer-content').html($(this).data('content'));
+                            });
+                        }
+                        initDataViewer();
                         $('#raw-table').on( 'page.dt search.dt init.dt order.dt length.dt', function () {
                         	reload = true;
                         });
                         $('#raw-table').on( 'draw.dt', function () {
                         	if(reload){
-                        		$('[data-toggle="popover"]').popover({ html : true, container: 'footer', placement: 'bottom' });
+                        		initDataViewer();
                         		reload = false;
                         	}
                         });
