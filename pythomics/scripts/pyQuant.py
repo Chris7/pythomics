@@ -11,6 +11,7 @@ This will quantify labeled peaks (such as SILAC) in ms1 spectra. It relies solel
  which can correct for errors due to amino acid conversions.
 """
 import sys
+import decimal
 import csv
 import math
 import os
@@ -81,6 +82,9 @@ ion_search_group.add_argument('--msn', help='The ms level to search for the ion 
 ion_search_group.add_argument('--msn-ion', help='M/Z values to search for in the scans.', nargs='+', type=float)
 ion_search_group.add_argument('--msn-peaklist', help='A file containing peaks to search for in the scans.', type=argparse.FileType('rb'))
 ion_search_group.add_argument('--msn-quant-from', help='The ms level to quantify values from. i.e. if we are identifying an ion in ms2, we can quantify it in ms1 (or ms2). Default: msn value-1', type=int, default=None)
+
+quant_parameters = parser.add_argument_group('Quantification Parameters')
+quant_parameters.add_argument('--quant-method', help='The process to use for quantification. Default: Integrate for ms1, sum for ms2+.', choices=['integrate', 'sum'])
 
 
 output_group = parser.add_argument_group("Output Options")
@@ -243,7 +247,6 @@ class Worker(Process):
                     break
                 if base_rt+ms_index == len(self.msn_rt_map) or base_rt+ms_index < 0:
                     break
-                print 'fetching', base_rt+ms_index
                 df = self.getScan(self.msn_rt_map.index[base_rt+ms_index])
                 found = False
                 if df is not None:
@@ -575,7 +578,7 @@ def main():
 
     found_scans = {}
     raw_files = {}
-    silac_labels = {}
+    silac_labels = {'Light': {0: set([])}}
 
     name_mapping = {}
 
@@ -587,7 +590,6 @@ def main():
         except ValueError:
             label_info.columns = ['Label', 'AA', 'Mass']
             name_mapping = dict([(v['Label'],v['Label']) for i,v in label_info.iterrows()])
-        silac_labels = {'Light': {0: set([])}}
         for group_name, group_info in label_info.groupby('Label'):
             masses = {}
             label_name = name_mapping.get(group_name, group_name)
@@ -669,7 +671,6 @@ def main():
     elif source:
         results = GuessIterator(source, full=True, store=False, peptide=args.peptide)
         if not (args.label_scheme or args.label_method):
-            silac_labels = {'Light': {0: set([])}}
             silac_labels.update(results.getSILACLabels())
 
         for index, scan in enumerate(results.getScans(modifications=False)):
@@ -714,11 +715,8 @@ def main():
         # determine if we want to do ms1 ion detection, ms2 ion detection, all ms2 of each file
         if args.msn_ion or args.msn_peaklist:
             ion_search = True
-            if args.msn_ion:
-                d = {'ions': args.msn_ion}
-                raw_files[raw_file] = d
-            elif args.msn_peaklist:
-                d = {'ions': [float(i.strip()) for i in args.msn_peaklist if i]}
+            ions_selected = args.msn_ion if args.msn_ion else [float(i.strip()) for i in args.msn_peaklist if i]
+            d = {'ions': ions_selected}
             for i in scan_filemap:
                 raw_files[i] = d
         else:
@@ -888,11 +886,12 @@ def main():
         msn_rt_map = {}
         scan_charge_map = {}
 
-        raw = GuessIterator(filepath, full=True if ion_search or all_msn else False, store=False)
+        raw = GuessIterator(filepath, full=False, store=False)
         sys.stderr.write('Processing raw file.\n')
         if ion_search or all_msn:
             ion_search_list = []
             ion_tolerance = args.precursor_ppm/1e6
+            scans_to_fetch = []
         for index, scan in enumerate(raw):
             if index % 100 == 0:
                 sys.stderr.write('.')
@@ -904,38 +903,13 @@ def main():
             except KeyError:
                 msn_map[scan.ms_level] = np.array([scan_id])
             rt = scan.rt
-            if scan.ms_level == 1:
+            if scan.ms_level == msn_for_quant:
                 msn_rt_map[scan_id] = rt
             scan_rt_map[scan_id] = rt
             scan_charge_map[scan_id] = scan.charge
             if ion_search:
                 if scan.ms_level == msn_for_id:
-                    ions = raw_scans['ions']
-                    scan_mzs = np.array(scan.scans)[:,0]
-                    for ion in ions:
-                        nearest_mz = find_nearest(scan_mzs, ion)
-                        if peaks.get_ppm(ion, nearest_mz) < ion_tolerance:
-                            # we have two options here. If we are quantifying a preceeding scan or the ion itself per scan
-                            if msn_for_quant == msn_for_id:
-                                spectra_to_quant = scan_id
-                                # we are quantifying the ion itself
-                                d = {
-                                    'quant_scan': {'id': scan_id},
-                                    'id_scan': {
-                                        'id': scan_id, 'theor_mass': ion, 'rt': scan.rt,
-                                        'charge': scan.charge, 'mass': float(nearest_mz)
-                                    },
-                                }
-                            else:
-                                # we are identifying the ion in a particular scan, and quantifying a preceeding scan
-                                quant_msns = msn_map[msn_for_quant]
-                                # find the closest scan to this, which will be the parent scan
-                                spectra_to_quant = quant_msns.searchsorted(scan_id)
-                                d = {
-                                    'quant_scan': {'id': spectra_to_quant},
-                                    'id_scan': {'id': scan_id, 'rt': scan.rt, 'charge': scan.charge, 'mass': float(scan.mass)},
-                                }
-                            ion_search_list.append((spectra_to_quant, d))
+                    scans_to_fetch.append(scan_id)
             elif all_msn:
                 # we are quantifying all msn spectra of a given type
                 if msn_for_id == scan.ms_level:
@@ -947,8 +921,42 @@ def main():
                         'id_scan': {'id': scan_id, 'rt': scan.rt, 'charge': scan.charge, 'mass': float(scan.mass)},
                     }
                     ion_search_list.append((spectra_to_quant, d))
-            if len(ion_search_list) > 5:
+            del scan
+            if len(ion_search_list) > 100 or len(scans_to_fetch) > 100:
                 break
+
+        if ion_search:
+            for scan_id in scans_to_fetch:
+                ions = raw_scans['ions']
+                scan = raw.getScan(scan_id)
+                scan_mzs = np.array(scan.scans)[:,0]
+                mass, charge, rt = scan.mass, scan.charge, scan.rt
+                del scan
+                for ion in ions:
+                    ion_precision = np.abs(decimal.Decimal(str(ion)).as_tuple().exponent)
+                    nearest_mz = find_nearest(np.around(scan_mzs, decimals=ion_precision), ion)
+                    if peaks.get_ppm(ion, nearest_mz) < ion_tolerance:
+                        # we have two options here. If we are quantifying a preceeding scan or the ion itself per scan
+                        if msn_for_quant == msn_for_id:
+                            spectra_to_quant = scan_id
+                            # we are quantifying the ion itself
+                            d = {
+                                'quant_scan': {'id': scan_id},
+                                'id_scan': {
+                                    'id': scan_id, 'theor_mass': ion, 'rt': rt,
+                                    'charge': charge, 'mass': float(nearest_mz)
+                                },
+                            }
+                        else:
+                            # we are identifying the ion in a particular scan, and quantifying a preceeding scan
+                            quant_msns = msn_map[msn_for_quant]
+                            # find the closest scan to this, which will be the parent scan
+                            spectra_to_quant = quant_msns.searchsorted(scan_id)
+                            d = {
+                                'quant_scan': {'id': spectra_to_quant},
+                                'id_scan': {'id': scan_id, 'rt': rt, 'charge': charge, 'mass': float(mass)},
+                            }
+                        ion_search_list.append((spectra_to_quant, d))
 
         if ion_search or all_msn:
             raw_scans = [i[1] for i in sorted(ion_search_list, key=operator.itemgetter(0))]
