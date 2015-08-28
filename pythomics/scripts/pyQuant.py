@@ -84,7 +84,7 @@ ion_search_group.add_argument('--msn-peaklist', help='A file containing peaks to
 ion_search_group.add_argument('--msn-quant-from', help='The ms level to quantify values from. i.e. if we are identifying an ion in ms2, we can quantify it in ms1 (or ms2). Default: msn value-1', type=int, default=None)
 
 quant_parameters = parser.add_argument_group('Quantification Parameters')
-quant_parameters.add_argument('--quant-method', help='The process to use for quantification. Default: Integrate for ms1, sum for ms2+.', choices=['integrate', 'sum'])
+quant_parameters.add_argument('--quant-method', help='The process to use for quantification. Default: Integrate for ms1, sum for ms2+.', choices=['integrate', 'sum'], default='integrate')
 
 
 output_group = parser.add_argument_group("Output Options")
@@ -133,7 +133,7 @@ class Reader(Process):
 
 class Worker(Process):
     def __init__(self, queue=None, results=None, precision=6, raw_name=None, silac_labels=None, isotope_ppms=None,
-                 debug=False, html=False, mono=False, precursor_ppm=5.0, isotope_ppm=2.5,
+                 debug=False, html=False, mono=False, precursor_ppm=5.0, isotope_ppm=2.5, quant_method='integrate',
                  reader_in=None, reader_out=None, thread=None, fitting_run=False, msn_rt_map=None):
         super(Worker, self).__init__()
         self.precision = precision
@@ -155,6 +155,7 @@ class Worker(Process):
         self.thread = thread
         self.fitting_run = fitting_run
         self.isotope_ppms = isotope_ppms
+        self.quant_method = quant_method
 
     def convertScan(self, scan):
         import numpy as np
@@ -178,12 +179,6 @@ class Worker(Process):
             target_scan = scan_info.get('id_scan')
             quant_scan = scan_info.get('quant_scan')
             scanId = target_scan.get('id')
-            # d = {
-            #     'file': fname, 'quant_scan': {}, 'id_scan': {
-            #         'id': specId, 'mass': precursor_mass, 'peptide': peptide, 'rt': rt_value,
-            #         'charge': charge, 'modifications': None, 'label': name_mapping.get(i[label_col]) if label_col in i else None
-            #     }
-            #  }
             ms1 = quant_scan['id']
             charge = target_scan['charge']
 
@@ -260,7 +255,7 @@ class Worker(Process):
                         shift_max = precursor+shift_max/float(charge) if shift_max is not None else None
                         envelope = peaks.findEnvelope(df, measured_mz=measured_precursor, theo_mz=theoretical_precursor, max_mz=shift_max,
                                                       charge=charge, precursor_ppm=self.precursor_ppm, isotope_ppm=self.isotope_ppm,
-                                                      isotope_ppms=self.isotope_ppms if self.fitting_run else None,
+                                                      isotope_ppms=self.isotope_ppms if self.fitting_run else None, quant_method=self.quant_method,
                                                       theo_dist=theo_dist, label=precursor_label, skip_isotopes=finished_isotopes[precursor_label],
                                                       last_precursor=last_precursors[delta].get(precursor_label, measured_precursor))
                         if not envelope['envelope']:
@@ -469,7 +464,7 @@ class Worker(Process):
                         # int_args = (res.x[rt_index]*mval, res.x[rt_index+1], res.x[rt_index+2])
                         left, right = xdata[0]-4*std, xdata[-1]+4*std2
                         xr = np.linspace(left, right, 1000)
-                        int_val = integrate.simps(peaks.bigauss(xr, *peak_params), x=xr)
+                        int_val = integrate.simps(peaks.bigauss(xr, *peak_params), x=xr) if self.quant_method == 'integrate' else ydata[(ydata.index > left) & (ydata.index < right)].sum()
                         isotope_index = isotope_labels.loc[index, 'isotope_index']
 
                         if int_val and not pd.isnull(int_val) and gc != 'c':
@@ -537,13 +532,6 @@ class Worker(Process):
         for params in iter(self.queue.get, None):
             self.run_thing(params)
         self.results.put(None)
-
-def find_nearest(array,value):
-    idx = np.searchsorted(array, value, side="left")
-    if math.fabs(value - array[idx-1]) < math.fabs(value - array[idx]):
-        return array[idx-1]
-    else:
-        return array[idx]
 
 def main():
     args = parser.parse_args()
@@ -749,7 +737,6 @@ def main():
     completed = 0
     sys.stderr.write('Beginning SILAC quantification.\n')
     scan_count = len(found_scans)
-    print scan_count, 'scans'
     headers = ['Raw File']+[i[1] for i in RESULT_ORDER]
     if resume:
         if not out:
@@ -922,20 +909,22 @@ def main():
                     }
                     ion_search_list.append((spectra_to_quant, d))
             del scan
-            if len(ion_search_list) > 100 or len(scans_to_fetch) > 100:
-                break
 
         if ion_search:
             for scan_id in scans_to_fetch:
                 ions = raw_scans['ions']
                 scan = raw.getScan(scan_id)
-                scan_mzs = np.array(scan.scans)[:,0]
+                scan_mzs = np.array(scan.scans)
+                scan_mzs = scan_mzs[scan_mzs[:, 1] > 0][:, 0]
+                if not np.any(scan_mzs):
+                    continue
                 mass, charge, rt = scan.mass, scan.charge, scan.rt
                 del scan
                 for ion in ions:
-                    ion_precision = np.abs(decimal.Decimal(str(ion)).as_tuple().exponent)
-                    nearest_mz = find_nearest(np.around(scan_mzs, decimals=ion_precision), ion)
+                    # ion_precision = np.abs(decimal.Decimal(str(ion)).as_tuple().exponent)
+                    nearest_mz = peaks.find_nearest(scan_mzs, ion)
                     if peaks.get_ppm(ion, nearest_mz) < ion_tolerance:
+                        print peaks.get_ppm(ion, nearest_mz), ion, nearest_mz, ion_tolerance
                         # we have two options here. If we are quantifying a preceeding scan or the ion itself per scan
                         if msn_for_quant == msn_for_id:
                             spectra_to_quant = scan_id
@@ -959,6 +948,7 @@ def main():
                         ion_search_list.append((spectra_to_quant, d))
 
         if ion_search or all_msn:
+            scan_count = len(ion_search_list)
             raw_scans = [i[1] for i in sorted(ion_search_list, key=operator.itemgetter(0))]
 
         reader = Reader(reader_in, reader_outs, raw_file=raw)
@@ -967,8 +957,8 @@ def main():
         for i in xrange(threads):
             worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, silac_labels=silac_labels,
                             debug=args.debug, html=html, mono=not args.spread, precursor_ppm=args.precursor_ppm,
-                            isotope_ppm=args.isotope_ppm, isotope_ppms=None, msn_rt_map = msn_rt_map,
-                            reader_in=reader_in, reader_out=reader_outs[i], thread=i)
+                            isotope_ppm=args.isotope_ppm, isotope_ppms=None, msn_rt_map=msn_rt_map,
+                            reader_in=reader_in, reader_out=reader_outs[i], thread=i, quant_method=args.quant_method)
             workers.append(worker)
             worker.start()
 
