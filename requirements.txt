@@ -3,3 +3,6 @@ pysam
 matplotlib
 scipy
 pandas
+coveralls
+nose
+tox
