@@ -40,7 +40,7 @@ from scipy import integrate
 
 from pythomics.templates import CustomParser
 from pythomics.proteomics.parsers import GuessIterator
-from pythomics.proteomics import peaks, config
+from pythomics.proteomics import config, peaks
 
 RESULT_ORDER = [('peptide', 'Peptide'), ('modifications', 'Modifications'),
                 ('charge', 'Charge'), ('ms1', 'MS1 Spectrum ID'), ('scan', 'MS2 Spectrum ID'), ('rt', 'Retention Time')]
@@ -81,11 +81,12 @@ ion_search_group = parser.add_argument_group('Ion Search')
 ion_search_group.add_argument('--msn', help='The ms level to search for the ion in. Default: 2 (ms2)', type=int, default=2)
 ion_search_group.add_argument('--msn-ion', help='M/Z values to search for in the scans.', nargs='+', type=float)
 ion_search_group.add_argument('--msn-peaklist', help='A file containing peaks to search for in the scans.', type=argparse.FileType('rb'))
+ion_search_group.add_argument('--msn-ppm', help='The error tolerance for identifying the ion(s).', type=float, default=200)
 ion_search_group.add_argument('--msn-quant-from', help='The ms level to quantify values from. i.e. if we are identifying an ion in ms2, we can quantify it in ms1 (or ms2). Default: msn value-1', type=int, default=None)
 
 quant_parameters = parser.add_argument_group('Quantification Parameters')
 quant_parameters.add_argument('--quant-method', help='The process to use for quantification. Default: Integrate for ms1, sum for ms2+.', choices=['integrate', 'sum'], default='integrate')
-
+quant_parameters.add_argument('--reporter-ion', help='We are quantifying from reporter ions. As such, we only analyze a single scan.', action='store_true')
 
 output_group = parser.add_argument_group("Output Options")
 output_group.add_argument('--debug', help="This will output debug information and graphs.", action='store_true')
@@ -134,7 +135,7 @@ class Reader(Process):
 class Worker(Process):
     def __init__(self, queue=None, results=None, precision=6, raw_name=None, silac_labels=None, isotope_ppms=None,
                  debug=False, html=False, mono=False, precursor_ppm=5.0, isotope_ppm=2.5, quant_method='integrate',
-                 reader_in=None, reader_out=None, thread=None, fitting_run=False, msn_rt_map=None):
+                 reader_in=None, reader_out=None, thread=None, fitting_run=False, msn_rt_map=None, reporter_mode=False):
         super(Worker, self).__init__()
         self.precision = precision
         self.precursor_ppm = precursor_ppm
@@ -156,6 +157,7 @@ class Worker(Process):
         self.fitting_run = fitting_run
         self.isotope_ppms = isotope_ppms
         self.quant_method = quant_method
+        self.reporter_mode = reporter_mode
 
     def convertScan(self, scan):
         import numpy as np
@@ -190,7 +192,7 @@ class Worker(Process):
             if self.debug:
                 sys.stderr.write('thread {4} on ms {0} {1} {2} {3}\n'.format(ms1, rt, precursor, scan_info, id(self)))
 
-            precursors = {'Light': 0.0}
+            precursors = {}
             silac_dict = {'data': None, 'df': pd.DataFrame(), 'precursor': 'NA',
                           'isotopes': {}, 'peaks': OrderedDict(), 'intensity': 'NA'}
             data = OrderedDict()
@@ -222,6 +224,8 @@ class Worker(Process):
                 # get the non-specific ones
                 precursors[silac_label] = silac_shift
                 data[silac_label] = copy.deepcopy(silac_dict)
+            if not precursors:
+                precursors = {'Precursor': 0.0}
             precursors = OrderedDict(sorted(precursors.items(), key=operator.itemgetter(1)))
             shift_maxes = {i: j for i,j in zip(precursors.keys(), precursors.values()[1:])}
             finished = set([])
@@ -248,13 +252,17 @@ class Worker(Process):
                     for precursor_label, precursor_shift in precursors.items():
                         if precursor_label in finished:
                             continue
-                        measured_precursor = precursor+precursor_shift/float(charge)
-                        theoretical_precursor = theor_mass+precursor_shift/float(charge)
+                        if self.reporter_mode:
+                            measured_precursor = precursor_shift
+                            theoretical_precursor = precursor_shift
+                        else:
+                            measured_precursor = precursor+precursor_shift/float(charge)
+                            theoretical_precursor = theor_mass+precursor_shift/float(charge)
                         data[precursor_label]['precursor'] = measured_precursor
                         shift_max = shift_maxes.get(precursor_label)
                         shift_max = precursor+shift_max/float(charge) if shift_max is not None else None
                         envelope = peaks.findEnvelope(df, measured_mz=measured_precursor, theo_mz=theoretical_precursor, max_mz=shift_max,
-                                                      charge=charge, precursor_ppm=self.precursor_ppm, isotope_ppm=self.isotope_ppm,
+                                                      charge=charge, precursor_ppm=self.precursor_ppm, isotope_ppm=self.isotope_ppm, reporter_mode=self.reporter_mode,
                                                       isotope_ppms=self.isotope_ppms if self.fitting_run else None, quant_method=self.quant_method,
                                                       theo_dist=theo_dist, label=precursor_label, skip_isotopes=finished_isotopes[precursor_label],
                                                       last_precursor=last_precursors[delta].get(precursor_label, measured_precursor))
@@ -299,6 +307,8 @@ class Worker(Process):
                     elif ms_index >= 2:
                         break
                 del df
+                if self.reporter_mode:
+                    break
                 ms_index += delta
 
             if isotope_labels:
@@ -546,6 +556,8 @@ def main():
     calc_stats = not args.disable_stats
     msn_for_id = args.msn
     msn_for_quant = args.msn_quant_from if args.msn_quant_from else msn_for_id-1
+    ion_compare = args.reporter_ion
+    msn_ppm = args.msn_ppm
 
     scan_filemap = {}
 
@@ -566,7 +578,7 @@ def main():
 
     found_scans = {}
     raw_files = {}
-    silac_labels = {'Light': {0: set([])}}
+    silac_labels = {'Light': {0: set([])}} if not ion_compare else {}
 
     name_mapping = {}
 
@@ -598,7 +610,6 @@ def main():
     # options determining modes to quantify
     all_msn = False # we just have a raw file
     ion_search = False # we have an ion we want to find
-
 
     if args.tsv:
         dat = pd.read_table(source, sep='\t')
@@ -661,7 +672,7 @@ def main():
         if not (args.label_scheme or args.label_method):
             silac_labels.update(results.getSILACLabels())
 
-        for index, scan in enumerate(results.getScans(modifications=False)):
+        for index, scan in enumerate(results.getScans(modifications=False, fdr=True)):
             if index%1000 == 0:
                 sys.stderr.write('.')
             if scan is None:
@@ -877,7 +888,7 @@ def main():
         sys.stderr.write('Processing raw file.\n')
         if ion_search or all_msn:
             ion_search_list = []
-            ion_tolerance = args.precursor_ppm/1e6
+            ion_tolerance = args.msn_ppm/1e6
             scans_to_fetch = []
         for index, scan in enumerate(raw):
             if index % 100 == 0:
@@ -924,7 +935,6 @@ def main():
                     # ion_precision = np.abs(decimal.Decimal(str(ion)).as_tuple().exponent)
                     nearest_mz = peaks.find_nearest(scan_mzs, ion)
                     if peaks.get_ppm(ion, nearest_mz) < ion_tolerance:
-                        print peaks.get_ppm(ion, nearest_mz), ion, nearest_mz, ion_tolerance
                         # we have two options here. If we are quantifying a preceeding scan or the ion itself per scan
                         if msn_for_quant == msn_for_id:
                             spectra_to_quant = scan_id
@@ -957,7 +967,7 @@ def main():
         for i in xrange(threads):
             worker = Worker(queue=in_queue, results=result_queue, raw_name=filepath, silac_labels=silac_labels,
                             debug=args.debug, html=html, mono=not args.spread, precursor_ppm=args.precursor_ppm,
-                            isotope_ppm=args.isotope_ppm, isotope_ppms=None, msn_rt_map=msn_rt_map,
+                            isotope_ppm=args.isotope_ppm, isotope_ppms=None, msn_rt_map=msn_rt_map, reporter_mode=ion_compare,
                             reader_in=reader_in, reader_out=reader_outs[i], thread=i, quant_method=args.quant_method)
             workers.append(worker)
             worker.start()

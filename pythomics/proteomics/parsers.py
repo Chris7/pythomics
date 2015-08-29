@@ -1216,9 +1216,10 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                 while tup is not None:
                     if tup is None:
                         break
-                    scan = self.parseFullScan(tup, modifications=modifications)
-                    scan.spectrumId = tup[3]
-                    yield scan
+                    if tup[1] is not None:
+                        scan = self.parseFullScan(tup, modifications=modifications)
+                        scan.spectrumId = tup[3]
+                        yield scan
                     try:
                         tup = self.cur.fetchone()
                     except:
@@ -1340,6 +1341,8 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         scanObj = PeptideObject()
         peptide = str(i[1])
         pid=i[2]
+        if pid is None:
+            return None
         if modifications:
             sql = 'select aam.ModificationName,pam.Position,aam.DeltaMass from peptidesaminoacidmodifications pam left join aminoacidmodifications aam on (aam.AminoAcidModificationID=pam.AminoAcidModificationID) where pam.PeptideID=%s'%pid
             for row in self.conn.execute(sql):

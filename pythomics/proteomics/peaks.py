@@ -239,18 +239,18 @@ def findMicro(df, pos, ppm=None, start_mz=None, calc_start_mz=None, isotope=0, s
         mu = mapper(peak[1])
     except:
         print 'mu', sorted_peaks, peak, y.index
-        return {'int': 0}
+        return {'int': 0, 'error': np.inf}
     try:
         std = mapper(y.index[0]+np.abs(peak[2]))-mapper(y.index[0])
     except:
         print 'std', sorted_peaks, peak, y.index
-        return {'int': 0}
+        return {'int': 0, 'error': np.inf}
     peak_gauss = (peak[0]*y.max(), mu, std)
     peak[0] *= y.max()
 
     lr = np.linspace(peak_gauss[1]-peak_gauss[2]*4, peak_gauss[1]+peak_gauss[2]*4, 1000)
     left_peak, right_peak = peak[1]-peak[2]*2, peak[1]+peak[2]*2
-    int_val = integrate.simps(gauss(lr, *peak_gauss), x=lr) if quant_method == 'integrate' else y[(y.index > left_peak) & (y.index < right_peak)].sum()
+    int_val = integrate.simps(gauss(lr, *peak_gauss), x=lr)# if quant_method == 'integrate' else y[(y.index > left_peak) & (y.index < right_peak)].sum()
 
     return {'int': int_val if fit else 0, 'bounds': (left, right), 'params': peak, 'error': sorted_peaks[0][1]}
 
@@ -802,7 +802,7 @@ def get_ppm(theoretical, observed):
     return np.abs(float(theoretical)-float(observed))/float(theoretical)
 
 def findEnvelope(df, measured_mz=None, theo_mz=None, max_mz=None, precursor_ppm=5, isotope_ppm=2.5, isotope_ppms=None, charge=2, debug=False,
-                 isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None, last_precursor=None, quant_method='integrate'):
+                 isotope_offset=0, theo_dist=None, label=None, skip_isotopes=None, last_precursor=None, quant_method='integrate', reporter_mode=False):
     # returns the envelope of isotopic peaks as well as micro envelopes  of each individual cluster
     spacing = NEUTRON/float(charge)
     start_mz = measured_mz if isotope_offset == 0 else measured_mz+isotope_offset*NEUTRON/float(charge)
@@ -863,43 +863,45 @@ def findEnvelope(df, measured_mz=None, theo_mz=None, max_mz=None, precursor_ppm=
             start = start['params'][1]
     else:
         return empty_dict
+
     valid_locations2 = OrderedDict()
     valid_locations2[isotope_index] = [(isotope_index, start)]
 
-    isotope_index += 1
-    pos = find_nearest_index(non_empty.index.values, start)+1
-    offset = isotope_index*spacing
-    df_len = non_empty.shape[0]
-    last_displacement = None
-    valid_locations = []
-    tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
+    if not reporter_mode:
+        isotope_index += 1
+        pos = find_nearest_index(non_empty.index.values, start)+1
+        offset = isotope_index*spacing
+        df_len = non_empty.shape[0]
+        last_displacement = None
+        valid_locations = []
+        tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
 
-    while pos < df_len:
-        # search for the ppm error until it rises again, we select the minima and if this minima is
-        # outside our ppm error, we stop the expansion of our isotopic cluster
-        current_loc = non_empty.index[pos]
-        if max_mz is not None and current_loc >= max_mz:
-            if not valid_locations:
+        while pos < df_len:
+            # search for the ppm error until it rises again, we select the minima and if this minima is
+            # outside our ppm error, we stop the expansion of our isotopic cluster
+            current_loc = non_empty.index[pos]
+            if max_mz is not None and current_loc >= max_mz:
+                if not valid_locations:
+                    break
+                displacement = last_displacement+tolerance if last_displacement is not None else tolerance*2
+            else:
+                displacement = get_ppm(start+offset, current_loc)
+            if debug:
+                print pos, start, current_loc, displacement, last_displacement, displacement > last_displacement, last_displacement < tolerance, isotope_index, offset
+            if displacement < tolerance:
+                valid_locations.append((displacement, current_loc))
+            if valid_locations and displacement > last_displacement:
+                # pick the largest peak within our error tolerance
+                valid_locations2[isotope_index] = valid_locations
+                isotope_index += 1
+                tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
+                offset = spacing*isotope_index
+                displacement = get_ppm(start+offset, current_loc)
+                valid_locations = []
+            elif last_displacement is not None and displacement > last_displacement and not valid_locations:
                 break
-            displacement = last_displacement+tolerance if last_displacement is not None else tolerance*2
-        else:
-            displacement = get_ppm(start+offset, current_loc)
-        if debug:
-            print pos, start, current_loc, displacement, last_displacement, displacement > last_displacement, last_displacement < tolerance, isotope_index, offset
-        if displacement < tolerance:
-            valid_locations.append((displacement, current_loc))
-        if valid_locations and displacement > last_displacement:
-            # pick the largest peak within our error tolerance
-            valid_locations2[isotope_index] = valid_locations
-            isotope_index += 1
-            tolerance = isotope_ppms.get(isotope_index, isotope_ppm)/1000000.0
-            offset = spacing*isotope_index
-            displacement = get_ppm(start+offset, current_loc)
-            valid_locations = []
-        elif last_displacement is not None and displacement > last_displacement and not valid_locations:
-            break
-        last_displacement = displacement
-        pos += 1
+            last_displacement = displacement
+            pos += 1
 
     #combine any overlapping micro envelopes
     #final_micros = self.merge_list(micro_dict)
