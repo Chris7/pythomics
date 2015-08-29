@@ -1,0 +1,5 @@
+lxml
+pysam
+matplotlib
+scipy
+pandas
