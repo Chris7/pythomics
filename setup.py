@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='pythomics',
-      version='0.2.01',
+      version='0.3.0',
       description='A multi-omic python package',
       url='https://github.com/pandeylab/pythomics',
       author='Chris Mitchell',
@@ -14,5 +14,5 @@ setup(name='pythomics',
                'pythomics/scripts/incorporateGFF.py', 'pythomics/scripts/proteinInference.py',
                'pythomics/scripts/featureCollapser.py', 'pythomics/scripts/fastxTrimmer.py', 
                'pythomics/scripts/intersectFiles.py', 'pythomics/scripts/junctionalReads.py',
-               'pythomics/scripts/pyQuant.py', 'pythomics/scripts/ptmSummary.py'],
+               'pythomics/scripts/ptmSummary.py'],
       zip_safe=False)
