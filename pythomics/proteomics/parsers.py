@@ -97,9 +97,9 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             self.gzip = False
         try:
             if isinstance(self.filename, gzip.GzipFile):
-                dom1 = etree.parse(self.filename).iter(tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogramList'))
+                dom1 = etree.parse(self.filename).iter(tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram'))
             else:
-                dom1 = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogramList'))
+                dom1 = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram'))
             self.lxml = True
         except NameError:
             self.lxml = False
@@ -119,7 +119,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         return self
 
     def _get_scan_from_string(self, value):
-        return value[value.find('scan=')+5:]
+        return value#[value.find('scan=')+5:]
 
     def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
         if 'zlib compression' in params:
@@ -157,15 +157,11 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.ms_level = ms_level
             scanObj.mass = float(precursor_ion)
             scanObj.charge = charge
-            title = dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
+            title = spectra.get('id')#dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
             scanObj.title = title
             scanObj.id = title
             scanObj.rt = float(rt)
-            try:
-                title = int(title)
-            except:
-                pass
-            if title > self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
+            if (not self.ms_filter or ms_level==self.ms_filter) and full:
                 mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
                 mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
                 mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
@@ -174,20 +170,58 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
                 scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
             spectra.clear()
             return scanObj
-        elif spectra.tag == '{0}chromatogramList'.format(namespace):
-            spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}chromatogram/{0}cvParam'.format(namespace))])
-            for info in spectra.findall('{0}chromatogram/{0}binaryDataArrayList/'.format(namespace)):
-                chroma_params = dict([(i.get('name'), i.get('value')) for i in info.findall('{0}cvParam'.format(namespace))])
-                if 'intensity array' in chroma_params:
-                    intensities = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
-                elif 'time array' in chroma_params:
-                    time_array = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
-            chromObj = Chromatogram()
-            chromObj.times = time_array
-            chromObj.intensities = intensities
-            self.chromatogram = chromObj
-            spectra.clear()
-            return None
+        elif spectra.tag == '{0}chromatogram'.format(namespace):
+            if spectra.get('id') == 'TIC':
+                spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
+                for info in spectra.findall('{0}binaryDataArrayList/'.format(namespace)):
+                    chroma_params = dict([(i.get('name'), i.get('value')) for i in info.findall('{0}cvParam'.format(namespace))])
+                    if 'intensity array' in chroma_params:
+                        intensities = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
+                    elif 'time array' in chroma_params:
+                        time_array = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
+                chromObj = Chromatogram()
+                chromObj.times = time_array
+                chromObj.intensities = intensities
+                self.chromatogram = chromObj
+                spectra.clear()
+                return None
+            else:
+                scanObj = ScanObject()
+                # spectra_info = dict(zip(spectra.keys(),spectra.values()))
+                spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
+                scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
+                precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
+                print precursor_info
+                # print 'spectra info', spectra_info
+                # print 'spectra params', spectra_params
+                # print 'our scan info', scan_info
+                # print 'our precursor info', precursor_info
+                ms_level = int(spectra_params.get('ms level', 0))
+                charge = precursor_info.get('charge state', 0)
+                precursor_ion = precursor_info.get('isolation window target m/z', 0)
+                # precursor_intensity = precursor_info.get('peak intensity', 0)
+                rt = scan_info.get('scan start time', 0)
+                # rt_length = scan_info.get('ion injection time', 0)
+                scanObj.ms_level = ms_level
+                scanObj.mass = float(precursor_ion)
+                scanObj.charge = charge
+                title = spectra.get('id')
+                scanObj.title = title
+                scanObj.id = title
+                scanObj.rt = float(rt)
+                try:
+                    title = int(title)
+                except:
+                    pass
+                if title > self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
+                    mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
+                    mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
+                    mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
+                    intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
+                    intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
+                    scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
+                spectra.clear()
+                return scanObj
         # elif spect:
         #     raise StopIteration
 
@@ -224,8 +258,10 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
                     [i for i in self]
                 self.filename.seek(int(self.ra[str(id)]))
                 entry = self.filename.readline()
+                opening_tag = entry[1:entry.find(' ')]
+                closing_tag = '</{}'.format(opening_tag)
                 row = [entry]
-                while '</spectrum>' not in entry:
+                while closing_tag not in entry:
                     entry = self.filename.readline()
                     row.append(entry)
                 spectra = etree.fromstring(''.join(row))
