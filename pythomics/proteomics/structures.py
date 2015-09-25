@@ -106,7 +106,10 @@ class PeptideObject(ScanObject):
     def modifiedPeptide(self):
         peptide = list(self.peptide)
         for i in self.mods:
-            aa, pos = i[0], int(i[1])
+            aa, pos = i[0], i[1]
+            if aa not in config.RESIDUE_MASSES:
+                continue
+            pos = int(pos)
             assert peptide[pos].upper() == aa.upper(), 'Amino acid {} in is not equal to modification amino acid {}'.format(peptide[pos], aa)
             peptide[pos] = aa.lower()
         return ''.join(peptide)

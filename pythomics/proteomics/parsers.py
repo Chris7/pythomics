@@ -1079,7 +1079,6 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                 self.fileMap[str(i[0])]=str(i[1])
                 self.sFileMap[i[0]]=lastSplit.search(i[1]).group(1)
 
-
         #modification table
         sql = 'select a.AminoAcidModificationID,a.ModificationName, a.DeltaMass from aminoacidmodifications a'
         self.cur.execute(sql)
@@ -1095,6 +1094,11 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.mods = {}
         for i in self.cur.fetchall():
             self.mods[i[0]] = i[1:]
+        self.tmods = {}
+        sql = 'select ptm.PeptideID, GROUP_CONCAT(ptm.TerminalModificationID) from peptidesterminalmodifications ptm GROUP BY ptm.PeptideID'
+        self.cur.execute(sql)
+        for i in self.cur.fetchall():
+            self.tmods[i[0]] = i[1:]
         if peptide is not None and not isinstance(peptide, list):
             peptide = [peptide]
         self.extra = 'and p.Sequence IN ({})'.format(','.join(['"{}"'.format(i) for i in peptide])) if peptide is not None else ''
@@ -1299,7 +1303,6 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         return False
 
     def parseScan(self, i, modifications=True, full=False):
-#sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.SearchEngineRank),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel = 1 and p.SearchEngineRank = 1 GROUP BY p.SpectrumID'
         objs = []
         self.index+=1
         added = set([])#for some reason redundant scans appear
@@ -1309,14 +1312,15 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             else:
                 added.add((sequence,pepId))
             scanObj = PeptideObject()
-            try:
-                mods = self.mods[int(pepId)]
-                # print mods
+            mods = self.mods.get(int(pepId))
+            if mods is not None:
                 for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
                     modEntry = self.modTable[int(modId)]
                     scanObj.addModification(sequence[int(modPosition)], modPosition, modEntry[1], modEntry[0])
-            except KeyError:
-                pass
+            tmods = self.tmods.get(int(pepId), [])
+            for modId in tmods:
+                modEntry = self.modTable[int(modId)]
+                scanObj.addModification('[', 0, modEntry[1], modEntry[0])
             scanObj.peptide = sequence
             scanObj.rank = searchRank
             scanObj.confidence = confidence
@@ -1348,13 +1352,16 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             for row in self.conn.execute(sql):
                 scanObj.addModification(peptide[row[1]], str(row[1]), str(row[2]), row[0])
         else:
-            try:
-                mods = self.mods[int(pid)]
+            mods = self.mods.get(int(pid))
+            if mods is not None:
                 for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
                     modEntry = self.modTable[int(modId)]
                     scanObj.addModification(peptide[int(modPosition)], modPosition, modEntry[1], modEntry[0])
-            except KeyError:
-                pass
+            tmods = self.tmods.get(int(pid))
+            if tmods is not None:
+                for modId in tmods:
+                    modEntry = self.modTable[int(modId)]
+                    scanObj.addModification('[', 0, modEntry[1], modEntry[0])
         scanObj.peptide = peptide
         if self.decompressScanInfo(scanObj, i[0]):
             return scanObj
