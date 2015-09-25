@@ -157,9 +157,9 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.ms_level = ms_level
             scanObj.mass = float(precursor_ion)
             scanObj.charge = charge
-            title = spectra.get('id')#dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
+            title = spectra_params.get('spectrum title', spectra.get('id'))#dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
             scanObj.title = title
-            scanObj.id = title
+            scanObj.id = spectra.get('id')
             scanObj.rt = float(rt)
             if (not self.ms_filter or ms_level==self.ms_filter) and full:
                 mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
