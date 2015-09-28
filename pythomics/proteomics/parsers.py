@@ -95,23 +95,22 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             self.gzip = True
         else:
             self.gzip = False
-        try:
-            if isinstance(self.filename, gzip.GzipFile):
-                dom1 = etree.parse(self.filename).iter(tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram'))
-            else:
-                dom1 = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram'))
-            self.lxml = True
-        except NameError:
-            self.lxml = False
-            sys.stderr.write('MZML parsing unavailable: lxml is required to parse mzML files\n')
-            return
-        if self.lxml:
-            self.spectra = dom1
-            self.scans = {}
-            self.ra = {}
+        spectra_tags = ('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram')
+        # figure out what file we are
+        if self.gzip:
+            file_info = etree.parse(self.filename).iter(tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
         else:
-            #this isn't implemented
-            self.nest = 0
+            file_info = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
+        self.filetype = None
+        for filenode in file_info:
+            filetag = filenode[1]
+            file_params = dict([(i.get('name'), i.get('value')) for i in filetag.findall('{0}cvParam'.format('{http://psi.hupo.org/ms/mzml}'))])
+            if 'Thermo RAW file' in file_params:
+                self.filetype = 'thermo'
+        self.filename.seek(0)
+        self.spectra = etree.parse(self.filename).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename, tag=spectra_tags)
+        self.scans = {}
+        self.ra = {}
         self.startIter = True
         self.db = None
             
@@ -119,7 +118,12 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         return self
 
     def _get_scan_from_string(self, value):
-        return value#[value.find('scan=')+5:]
+        if self.filetype == 'thermo':
+            try:
+                return dict([i.split('=') for i in value.split(' ')]).get('scan', 'No Title')
+            except:
+                pass
+        return value
 
     def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
         if 'zlib compression' in params:
@@ -157,7 +161,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.ms_level = ms_level
             scanObj.mass = float(precursor_ion)
             scanObj.charge = charge
-            title = spectra_params.get('spectrum title', spectra.get('id'))#dict([i.split('=') for i in spectra.get('id').split(' ')]).get('scan', 'No Title')
+            title = self._get_scan_from_string(spectra.get('id'))#
             scanObj.title = title
             scanObj.id = spectra.get('id')
             scanObj.rt = float(rt)
@@ -191,7 +195,6 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
                 spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
                 scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
                 precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
-                print precursor_info
                 # print 'spectra info', spectra_info
                 # print 'spectra params', spectra_params
                 # print 'our scan info', scan_info
@@ -205,7 +208,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
                 scanObj.ms_level = ms_level
                 scanObj.mass = float(precursor_ion)
                 scanObj.charge = charge
-                title = spectra.get('id')
+                title = self._get_scan_from_string(spectra.get('id'))
                 scanObj.title = title
                 scanObj.id = title
                 scanObj.rt = float(rt)
@@ -529,8 +532,11 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
         # to definitively identify SILAC label schemes
         self.silac_labels = {'Light': {}}
         silac_parse = r'(?:(?P<mass>[0-9\.]+)\@(?P<residue>[KR]))'
+        self.file_path = self.filename.name
+        self.rt_parse = re.compile(r'PT([0-9\.]+)S')
         for i in specs.iter(tag='note'):
-            if 'residue, modification mass' in i.attrib.get('label'):
+            label = i.attrib.get('label')
+            if 'residue, modification mass' in label:
                 silac_matches = [j for j in re.finditer(silac_parse, i.text)]
                 label_names = []
                 masses = {}
@@ -546,7 +552,8 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
                             masses[mass] = set([aa])
                 if masses:
                     self.silac_labels[','.join(label_names)] = masses
-
+            elif label == 'spectrum, path':
+                self.file_path = i.text
         try:
             # we cannot use iterparse here because for some reason we randomly get screwed up on X!tandems namespaces with lxml
             self.group = etree.parse(self.filename.name).iterfind("group")
@@ -560,19 +567,27 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
         return self
 
     def parseModel(self, element):
-        charge = element.attrib.get("z", 'NA')
-        premass = element.attrib.get("mh", 'NA')
+        charge = int(element.attrib.get("z", 'NA'))
+        premass = float(element.attrib.get("mh", 'NA'))
         rt = element.attrib.get("rt", 'NA')
         scanObj = PeptideObject()
         scanObj.charge = charge
-        scanObj.mass = float(premass)
+        # X!Tandem gives M+H, so we reverese this to get the precursor as it appears on the scan
+        scanObj.mass = (premass+(charge-1)*config.HYDROGEN)/charge
         if rt:
-            try:
-                scanObj.rt = float(rt)
-            except ValueError:
-                scanObj.rt = rt
+            rt_match = self.rt_parse.match(rt)
+            if rt_match:
+                try:
+                    scanObj.rt = float(rt_match.group(1))/60
+                except ValueError:
+                    scanObj.rt = rt
+            else:
+                try:
+                    scanObj.rt = float(rt)
+                except ValueError:
+                    scanObj.rt = rt
 
-        scanObj.file = self.filename.name
+        scanObj.file = self.file_path
 
         support = element.iterfind("group")
         for i in support:
