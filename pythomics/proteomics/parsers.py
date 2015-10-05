@@ -105,7 +105,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         for filenode in file_info:
             filetag = filenode[1]
             file_params = dict([(i.get('name'), i.get('value')) for i in filetag.findall('{0}cvParam'.format('{http://psi.hupo.org/ms/mzml}'))])
-            if 'Thermo RAW file' in file_params:
+            if filter(lambda x: 'thermo raw' in x.lower(), file_params.keys()):
                 self.filetype = 'thermo'
         self.filename.seek(0)
         self.spectra = etree.parse(self.filename).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename, tag=spectra_tags)
@@ -163,7 +163,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.charge = charge
             title = self._get_scan_from_string(spectra.get('id'))#
             scanObj.title = title
-            scanObj.id = spectra.get('id')
+            scanObj.id = title
             scanObj.rt = float(rt)
             if (not self.ms_filter or ms_level==self.ms_filter) and full:
                 mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
@@ -236,7 +236,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         if self.gzip:
             scan = self.parselxml(spectra, full=True)
             if self.store and isinstance(scan, ScanObject):
-                self.scans[scan.title] = scan
+                self.scans[scan.id] = scan
             return scan
         else:
             return self.parselxml(spectra[1], full=self.full)
@@ -759,6 +759,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                     title = '='.join(entry[1:])
                     foundTitle = True
                     scanObj.title = title
+                    scanObj.id = title
                 elif entry[0] == 'RTINSECONDS':
                     scanObj.rt = float(entry[1])
             else:
@@ -793,7 +794,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                 scan = self.parseScan(scanInfo)
                 if scan:
                     if self.rand:
-                        self.ra[scan.title] = (pStart,pos)
+                        self.ra[scan.id] = (pStart,pos)
                     return scan
                 return None
             elif setupScan:
@@ -1307,7 +1308,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         #sid = '%s.%s.%s'%(fName, finfo[2],finfo[2])
                         scanObj.file = fName
                         scanObj.title = sid
-                        scanObj.id = sid
+                        scanObj.id = finfo[scanIndex]
                         scanObj.rt = float(finfo[7])
                         scanObj.rawId = finfo[scanIndex]
                         master_scan = finfo[5]
@@ -1338,13 +1339,13 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                     elif '</PeakCentroids>' in row:
                         break
         if msInfo:
-	    # print scanObj.scans
             if master_scan != "-1" and ms1_scans:
                 master_scanobj = self.master_scans.get(master_scan, None)
                 if master_scanobj is None:
                     master_scanobj = ScanObject()
                     self.master_scans[master_scan] = master_scanobj
                     master_scanobj.title = master_scan
+                    master_scanobj.id = master_scan
                     master_scanobj.ms_level = 1
                     master_scanobj.rt = scanObj.rt
                 master_scanobj.scans += ms1_scans
@@ -1612,6 +1613,7 @@ class MQIterator(templates.GenericIterator, GenericProteomicIterator):
                     master_scanobj = ScanObject()
                     self.master_scans[master_scan] = master_scanobj
                     master_scanobj.title = master_scan
+                    master_scanobj.id = master_scan
                     master_scanobj.ms_level = 1
                     master_scanobj.rt = scanObj.rt
                 master_scanobj.scans += ms1_scans
@@ -1650,7 +1652,7 @@ class MQIterator(templates.GenericIterator, GenericProteomicIterator):
             lScan = i[9]
             sid = '%s.%s.%s'%(fName, fScan,lScan)
             scanObj.title = sid
-            scanObj.id = sid
+            scanObj.id = fScan
             scanObj.spectrumId=i[5]
             scanObj.rawId = lScan
             objs.append(scanObj)
