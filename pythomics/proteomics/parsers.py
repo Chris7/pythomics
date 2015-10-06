@@ -102,11 +102,17 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         else:
             file_info = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
         self.filetype = None
+        identifiers = [('thermo raw', 'thermo'), ('abi wiff file', 'wiff')]
         for filenode in file_info:
             filetag = filenode[1]
             file_params = dict([(i.get('name'), i.get('value')) for i in filetag.findall('{0}cvParam'.format('{http://psi.hupo.org/ms/mzml}'))])
-            if filter(lambda x: 'thermo raw' in x.lower(), file_params.keys()):
-                self.filetype = 'thermo'
+            for identifier, filetype in identifiers:
+                if filter(lambda x: identifier in x.lower(), file_params.keys()):
+                    self.filetype = filetype
+                    break
+            filetag.clear()
+            break
+
         self.filename.seek(0)
         self.spectra = etree.parse(self.filename).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename, tag=spectra_tags)
         self.scans = {}
@@ -117,12 +123,20 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
     def __iter__(self):
         return self
 
-    def _get_scan_from_string(self, value):
+    def _get_scan_from_string(self, value, scan=None):
         if self.filetype == 'thermo':
             try:
                 return dict([i.split('=') for i in value.split(' ')]).get('scan', 'No Title')
             except:
                 pass
+        if self.filetype == 'wiff':
+            identifier = 'transition='
+            tpos = value.find(identifier)
+            if tpos != -1:
+                left = tpos+len(identifier)
+                right = value[left:].find(' ')
+                right = -1 if right == -1 else right+left
+                return value[left:right] if right != -1 else value[left:]
         return value
 
     def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
@@ -191,20 +205,19 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
                 return None
             else:
                 scanObj = ScanObject()
-                # spectra_info = dict(zip(spectra.keys(),spectra.values()))
                 spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
                 scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
                 precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
-                # print 'spectra info', spectra_info
-                # print 'spectra params', spectra_params
-                # print 'our scan info', scan_info
-                # print 'our precursor info', precursor_info
-                ms_level = int(spectra_params.get('ms level', 0))
-                charge = precursor_info.get('charge state', 0)
+                if self.filetype == 'wiff':
+                    charge = 1
+                    ms_level = int(spectra_params.get('ms level', 2))
+                    product_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}product/{0}isolationWindow/{0}cvParam'.format(namespace))])
+                    scanObj.product_ion = product_info.get('isolation window target m/z', 0)
+                else:
+                    ms_level = int(spectra_params.get('ms level', 0))
+                    charge = precursor_info.get('charge state', 0)
                 precursor_ion = precursor_info.get('isolation window target m/z', 0)
-                # precursor_intensity = precursor_info.get('peak intensity', 0)
                 rt = scan_info.get('scan start time', 0)
-                # rt_length = scan_info.get('ion injection time', 0)
                 scanObj.ms_level = ms_level
                 scanObj.mass = float(precursor_ion)
                 scanObj.charge = charge
@@ -216,7 +229,7 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
                     title = int(title)
                 except:
                     pass
-                if title > self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
+                if title >= self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
                     mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
                     mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
                     mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)

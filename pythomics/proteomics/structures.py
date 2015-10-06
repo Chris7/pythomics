@@ -36,6 +36,9 @@ class ScanObject(object):
         self.ms_level = None
         self._rawId = None
 
+        #SRM/MRM parameters
+        self.product_ion = 0
+
     @property
     def rawId(self):
         if self._rawId is None:
