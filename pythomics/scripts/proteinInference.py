@@ -44,7 +44,7 @@ protein_group.add_argument('--unique-only', help="Only group proteins with uniqu
 protein_group.add_argument('--position', help="Write the position of the peptide matches.", action='store_true')
 protein_group.add_argument('--case-sensitive', help="Treat peptides as case-sensitive (ie separate modified peptides)", action='store_true')
 mod_group = parser.add_argument_group('Peptide Modification Options')
-mod_group.add_argument('--mod-out', nargs='?', help="The file to write a modification-centric summary to.", type=argparse.FileType('w'), default=os.devnull)
+mod_group.add_argument('--mod-out', nargs='?', help="The file to write a modification-centric summary to.", type=argparse.FileType('w'), default=None)
 mod_group.add_argument('--modification-site', help="Write the position in the parent protein of the modification (requires case-sensitive and modifications being lower-cased).", action='store_true')
 parser.add_column_function('--mod-col', help="The column containing modification information.", group=mod_group)
 motif_group = mod_group.add_argument_group('Motif Options')
@@ -521,20 +521,20 @@ def main():
                 #     import pdb; pdb.set_trace();
                 out_writer.writerow(entry)
         stats['modifications'] = mod_stats
-    if args.mod_out:
-        with args.mod_out as o:
-            writer = csv.writer(o, delimiter=delimiter)
-            header = ['Site', inferred_name, 'Peptide']
-            if mod_col:
-                header.append(args.mod_col)
-            writer.writerow(header)
-            #mod_grouping[protein] = {'%s%d'%(k, mod_pos): {'values': set([d['mod_col']]), 'peptides': set([peptide])}}
-            for protein, sites_dict in mod_grouping.iteritems():
-                for site, site_dict in sites_dict.iteritems():
-                    entry = [site, protein, ';'.join(site_dict.get('peptides'))]
-                    if mod_col:
-                        entry.append(mod_col_func(site_dict.get('values',[])))
-                    writer.writerow(entry)
+    mod_out = args.mod_out if args.mod_out else open(os.path.join('{}_mods'.format(out_file.name)), 'wb')
+    with mod_out as o:
+        writer = csv.writer(o, delimiter=delimiter)
+        header = ['Site', inferred_name, 'Peptide']
+        if mod_col:
+            header.append(args.mod_col)
+        writer.writerow(header)
+        #mod_grouping[protein] = {'%s%d'%(k, mod_pos): {'values': set([d['mod_col']]), 'peptides': set([peptide])}}
+        for protein, sites_dict in mod_grouping.iteritems():
+            for site, site_dict in sites_dict.iteritems():
+                entry = [site, protein, ';'.join(site_dict.get('peptides'))]
+                if mod_col:
+                    entry.append(mod_col_func(site_dict.get('values',[])))
+                writer.writerow(entry)
     # write stats
     sys.stderr.write('Peptides Searched: %s\n'%stats['peptides'])
     sys.stderr.write('Unique Peptides Found: %s\n'%stats['peptides_found'])
