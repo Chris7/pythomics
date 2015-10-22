@@ -88,13 +88,10 @@ def main():
                 genes = all_data[(all_data[pep_col] == peptide)==True][gene_col].str.split(';').fillna('NA')
                 gene = ';'.join(list(OrderedDict.fromkeys([j for i in genes for j in i])))
                 matches = all_data[all_data[pep_col] == peptide]
-                # import pdb; pdb.set_trace();
                 df_col_index = (gene, protein, site)
                 for quant_col in file_quant_cols:
                     med = ((np.log2(matches[quant_col]) if med_norm else matches[quant_col])-wp_median).median()
                     for col_name in col_names[quant_col]:
-                        d2 = copy.deepcopy(d)
-                        d2.update({'Peptide': peptide, col_name: med})
                         df_index = (gene, protein, site, peptide)
                         if df_index in df and col_name in df[df_index]:
                             continue
@@ -112,11 +109,11 @@ def main():
 
     df = {}
     df_collapsed = {}
-    colnames = {}
     for ptm_file, mod_file in zip(inference_files, mod_files):
         p1 = pd.read_table(ptm_file.name)
         file_name = os.path.split(ptm_file.name)[1]
         p1_mods = pd.read_table(mod_file.name)
+        colnames = {}
         for quant_col in quant_cols:
             colname = '{}-{}'.format(file_name,quant_col)
             try:
