@@ -82,7 +82,6 @@ def main():
         for index, row in mods.iterrows():
             site = row['Site'].lower()
             protein = row[site_col]
-            d = {'Site': site, site_col: protein}
             peptides = list(set(row['Peptide'].split(';')))
             for peptide in peptides:
                 genes = all_data[(all_data[pep_col] == peptide)==True][gene_col].str.split(';').fillna('NA')
@@ -130,7 +129,8 @@ def main():
     # do a median on the collapsed items
     for i,v in df_collapsed.iteritems():
         for col in v.keys():
-            v[col] = np.median([k for k in v[col] if not pd.isnull(k)]) if isinstance(v[col], set) else v[col]
+            collapsed_items = [k for k in v[col] if not pd.isnull(k)] if isinstance(v[col], set) else v[col]
+            v[col] = np.median(collapsed_items) if collapsed_items else np.nan
 
     df = pd.DataFrame(df).T
     df_collapsed = pd.DataFrame(df_collapsed).T
