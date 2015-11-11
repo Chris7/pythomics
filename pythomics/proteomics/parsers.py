@@ -155,84 +155,35 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         return array
 
     def parselxml(self, spectra, full=False, namespace='{http://psi.hupo.org/ms/mzml}'):
-        if spectra.tag == '{0}indexedmzML'.format(namespace):
-            # read our index in
-            self.ra = dict([(self._get_scan_from_string(i.values()[0]), i.text) for i in spectra.findall('{0}indexList/{0}index/'.format(namespace))])
-            return None
-        elif spectra.tag == '{0}spectrum'.format(namespace):
-            scanObj = ScanObject()
-            # spectra_info = dict(zip(spectra.keys(),spectra.values()))
-            spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
-            scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
-            precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursorList/{0}precursor/{0}selectedIonList/{0}selectedIon/{0}cvParam'.format(namespace))])
-            # print 'spectra info', spectra_info
-            # print 'spectra params', spectra_params
-            # print 'our scan info', scan_info
-            # print 'our precursor info', precursor_info
-            ms_level = int(spectra_params.get('ms level', 0))
-            charge = precursor_info.get('charge state', 0)
-            precursor_ion = precursor_info.get('selected ion m/z', 0)
-            # precursor_intensity = precursor_info.get('peak intensity', 0)
-            rt = scan_info.get('scan start time', 0)
-            # rt_length = scan_info.get('ion injection time', 0)
-            scanObj.ms_level = ms_level
-            scanObj.mass = float(precursor_ion)
-            scanObj.charge = charge
-            title = self._get_scan_from_string(spectra.get('id'))#
-            scanObj.title = title
-            scanObj.id = title
-            scanObj.rt = float(rt)
-            if (not self.ms_filter or ms_level==self.ms_filter) and full:
-                mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
-                mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
-                mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
-                intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
-                intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
-                scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
-            spectra.clear()
-            return scanObj
-        elif spectra.tag == '{0}chromatogram'.format(namespace):
-            if spectra.get('id') == 'TIC':
-                spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
-                for info in spectra.findall('{0}binaryDataArrayList/'.format(namespace)):
-                    chroma_params = dict([(i.get('name'), i.get('value')) for i in info.findall('{0}cvParam'.format(namespace))])
-                    if 'intensity array' in chroma_params:
-                        intensities = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
-                    elif 'time array' in chroma_params:
-                        time_array = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
-                chromObj = Chromatogram()
-                chromObj.times = time_array
-                chromObj.intensities = intensities
-                self.chromatogram = chromObj
-                spectra.clear()
+        try:
+            if spectra.tag == '{0}indexedmzML'.format(namespace):
+                # read our index in
+                self.ra = dict([(self._get_scan_from_string(i.values()[0]), i.text) for i in spectra.findall('{0}indexList/{0}index/'.format(namespace))])
                 return None
-            else:
+            elif spectra.tag == '{0}spectrum'.format(namespace):
                 scanObj = ScanObject()
+                # spectra_info = dict(zip(spectra.keys(),spectra.values()))
                 spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
                 scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
-                precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
-                if self.filetype == 'wiff':
-                    charge = 1
-                    ms_level = int(spectra_params.get('ms level', 2))
-                    product_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}product/{0}isolationWindow/{0}cvParam'.format(namespace))])
-                    scanObj.product_ion = product_info.get('isolation window target m/z', 0)
-                else:
-                    ms_level = int(spectra_params.get('ms level', 0))
-                    charge = precursor_info.get('charge state', 0)
-                precursor_ion = precursor_info.get('isolation window target m/z', 0)
+                precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursorList/{0}precursor/{0}selectedIonList/{0}selectedIon/{0}cvParam'.format(namespace))])
+                # print 'spectra info', spectra_info
+                # print 'spectra params', spectra_params
+                # print 'our scan info', scan_info
+                # print 'our precursor info', precursor_info
+                ms_level = int(spectra_params.get('ms level', 0))
+                charge = precursor_info.get('charge state', 0)
+                precursor_ion = precursor_info.get('selected ion m/z', 0)
+                # precursor_intensity = precursor_info.get('peak intensity', 0)
                 rt = scan_info.get('scan start time', 0)
+                # rt_length = scan_info.get('ion injection time', 0)
                 scanObj.ms_level = ms_level
                 scanObj.mass = float(precursor_ion)
                 scanObj.charge = charge
-                title = self._get_scan_from_string(spectra.get('id'))
+                title = self._get_scan_from_string(spectra.get('id'))#
                 scanObj.title = title
                 scanObj.id = title
                 scanObj.rt = float(rt)
-                try:
-                    title = int(title)
-                except:
-                    pass
-                if title >= self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
+                if (not self.ms_filter or ms_level==self.ms_filter) and full:
                     mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
                     mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
                     mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
@@ -241,6 +192,60 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
                 spectra.clear()
                 return scanObj
+            elif spectra.tag == '{0}chromatogram'.format(namespace):
+                if spectra.get('id') == 'TIC':
+                    spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
+                    for info in spectra.findall('{0}binaryDataArrayList/'.format(namespace)):
+                        chroma_params = dict([(i.get('name'), i.get('value')) for i in info.findall('{0}cvParam'.format(namespace))])
+                        if 'intensity array' in chroma_params:
+                            intensities = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
+                        elif 'time array' in chroma_params:
+                            time_array = self.unpack_array(info.find('{0}binary'.format(namespace)).text, chroma_params, namespace=namespace)
+                    chromObj = Chromatogram()
+                    chromObj.times = time_array
+                    chromObj.intensities = intensities
+                    self.chromatogram = chromObj
+                    spectra.clear()
+                    return None
+                else:
+                    scanObj = ScanObject()
+                    spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
+                    scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
+                    precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
+                    if self.filetype == 'wiff':
+                        charge = 1
+                        ms_level = int(spectra_params.get('ms level', 2))
+                        product_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}product/{0}isolationWindow/{0}cvParam'.format(namespace))])
+                        scanObj.product_ion = product_info.get('isolation window target m/z', 0)
+                    else:
+                        ms_level = int(spectra_params.get('ms level', 0))
+                        charge = precursor_info.get('charge state', 0)
+                    precursor_ion = precursor_info.get('isolation window target m/z', 0)
+                    rt = scan_info.get('scan start time', 0)
+                    scanObj.ms_level = ms_level
+                    scanObj.mass = float(precursor_ion)
+                    scanObj.charge = charge
+                    title = self._get_scan_from_string(spectra.get('id'))
+                    scanObj.title = title
+                    scanObj.id = title
+                    scanObj.rt = float(rt)
+                    try:
+                        title = int(title)
+                    except:
+                        pass
+                    if title >= self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
+                        mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
+                        mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
+                        mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
+                        intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
+                        intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
+                        scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
+                    spectra.clear()
+                    return scanObj
+        except:
+            import traceback
+            sys.stderr.write('Error unpacking spectra {}:\n {}'.format(spectra, traceback.format_exc()))
+            return None
         # elif spect:
         #     raise StopIteration
 
@@ -1213,7 +1218,10 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             self.cur.execute(sql)
             for i in self.cur.fetchall():
                 xml = i[0]
-                silac = etree.fromstring(xml)
+                try:
+                    silac = etree.fromstring(xml)
+                except ValueError:
+                    silac = etree.fromstring(str(xml).encode('utf-16'))
         elif self.version == 2:
             silac = etree.fromstring([i for i in self.root.iterdescendants('QuantitationMethod')][0].text.encode('utf-16'))
         for method in silac.findall('*MethodPart'):
