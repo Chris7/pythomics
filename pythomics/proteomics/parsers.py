@@ -51,13 +51,52 @@ class GenericProteomicIterator(object):
     def getPeptide(self, peptide=None):
         pass
 
+    def getSILACLabels(self):
+        return {'Light': {0: set([])}}
+
+
+class XMLFileNameMixin(object):
+    def __init__(self, *args, **kwargs):
+        super(XMLFileNameMixin, self).__init__(*args, **kwargs)
+        if self.gzip:
+            file_info = etree.parse(self.filename.name).iter(tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
+        else:
+            file_info = etree.iterparse(self.filename.name, tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
+        self.filetype = None
+        identifiers = [('thermo raw', 'thermo'), ('abi wiff file', 'wiff')]
+        for filenode in file_info:
+            filetag = filenode[1]
+            file_params = dict([(i.get('name'), i.get('value')) for i in filetag.findall('{0}cvParam'.format('{http://psi.hupo.org/ms/mzml}'))])
+            for identifier, filetype in identifiers:
+                if filter(lambda x: identifier in x.lower(), file_params.keys()):
+                    self.filetype = filetype
+                    break
+            filetag.clear()
+            break
+
+    def _get_scan_from_string(self, value, scan=None):
+        if self.filetype == 'thermo':
+            try:
+                return dict([i.split('=') for i in value.split(' ')]).get('scan', 'No Title')
+            except:
+                pass
+        if self.filetype == 'wiff':
+            identifier = 'transition='
+            tpos = value.find(identifier)
+            if tpos != -1:
+                left = tpos+len(identifier)
+                right = value[left:].find(' ')
+                right = -1 if right == -1 else right+left
+                return value[left:right] if right != -1 else value[left:]
+        return value
+
 class GuessIterator(templates.GenericIterator):
     def __init__(self, *args, **kwargs):
         super(GuessIterator, self).__init__(*args, **kwargs)
         filename = self.filename.name.lower()
         if '.mzml' in filename:
             self.parser = MZMLIterator
-        elif 'pepxml' in filename:
+        elif '.pepxml' in filename or '.pep.xml' in filename:
             self.parser = PepXMLIterator
         elif '.xml' in filename:
             self.parser = XTandemXMLIterator
@@ -77,7 +116,8 @@ class GuessIterator(templates.GenericIterator):
     def next(self):
         return self.parser.next()
 
-class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
+
+class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename, full=False, store=True, ms_filter=False, start=0):
         """An iterator over the mzML file format.
          I just need a parser right now so the specs might not be exactly correct
@@ -91,30 +131,9 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
         self.full = full
         self.ms_filter = ms_filter
         self.start = start
-        if isinstance(self.filename, gzip.GzipFile):
-            self.gzip = True
-        else:
-            self.gzip = False
         spectra_tags = ('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram')
-        # figure out what file we are
-        if self.gzip:
-            file_info = etree.parse(self.filename).iter(tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
-        else:
-            file_info = etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
-        self.filetype = None
-        identifiers = [('thermo raw', 'thermo'), ('abi wiff file', 'wiff')]
-        for filenode in file_info:
-            filetag = filenode[1]
-            file_params = dict([(i.get('name'), i.get('value')) for i in filetag.findall('{0}cvParam'.format('{http://psi.hupo.org/ms/mzml}'))])
-            for identifier, filetype in identifiers:
-                if filter(lambda x: identifier in x.lower(), file_params.keys()):
-                    self.filetype = filetype
-                    break
-            filetag.clear()
-            break
-
         self.filename.seek(0)
-        self.spectra = etree.parse(self.filename).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename, tag=spectra_tags)
+        self.spectra = etree.parse(self.filename.name).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename.name, tag=spectra_tags)
         self.scans = {}
         self.ra = {}
         self.startIter = True
@@ -122,22 +141,6 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             
     def __iter__(self):
         return self
-
-    def _get_scan_from_string(self, value, scan=None):
-        if self.filetype == 'thermo':
-            try:
-                return dict([i.split('=') for i in value.split(' ')]).get('scan', 'No Title')
-            except:
-                pass
-        if self.filetype == 'wiff':
-            identifier = 'transition='
-            tpos = value.find(identifier)
-            if tpos != -1:
-                left = tpos+len(identifier)
-                right = value[left:].find(' ')
-                right = -1 if right == -1 else right+left
-                return value[left:right] if right != -1 else value[left:]
-        return value
 
     def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
         if 'zlib compression' in params:
@@ -286,20 +289,20 @@ class MZMLIterator(templates.GenericIterator, GenericProteomicIterator):
             sys.stderr.write('mzml cannot find %s\n'%id)
             return None
 
-class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
-    def __init__(self, filename):
+class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.GenericIterator):
+    def __init__(self, filename, *args, **kwargs):
         """An iterator over the pepXML file format.
 
         The returned items are ScanObjects
 
         """
-        super(PepXMLIterator, self).__init__(filename)
+        super(PepXMLIterator, self).__init__(filename, *args, **kwargs)
         try:
             #find our mzml first
-            mzml = etree.iterparse(self.filename, tag=('{http://regis-web.systemsbiology.net/pepXML}msms_run_summary',)).next()[1]
+            mzml = etree.iterparse(self.filename.name, tag=('{http://regis-web.systemsbiology.net/pepXML}msms_run_summary',)).next()[1]
             info = dict(mzml.items())
             try:
-                self.mzml = MZMLIterator('%s%s'%(info['base_name'], info['raw_data_type']))
+                self.mzml = MZMLIterator('%s%s'%(info['base_name'], info['raw_data']))
             except IOError:
                 # maybe we moved it, try this
                 xml_path, junk = os.path.split(filename)
@@ -311,7 +314,7 @@ class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
                     # one more try for a gz
                     self.mzml = MZMLIterator('%s%s.gz'%(new_path, info['raw_data_type']))
             self.filename.seek(0)
-            dom1 = etree.iterparse(self.filename, tag=('{http://regis-web.systemsbiology.net/pepXML}spectrum_query',))
+            dom1 = etree.iterparse(self.filename.name, tag=('{http://regis-web.systemsbiology.net/pepXML}spectrum_query',))
             self.lxml = True
         except NameError:
             self.lxml = False
@@ -330,9 +333,6 @@ class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
     def __iter__(self):
         return self
 
-    def _get_scan_from_string(self, value):
-        return value[value.find('scan=')+5:]
-
     def parselxml(self, spectra, full=False, namespace='{http://regis-web.systemsbiology.net/pepXML}'):
         if spectra.tag == '{0}spectrum_query'.format(namespace):
             pepObj = PeptideObject()
@@ -341,15 +341,22 @@ class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
             start_scan = str(int(pep_info.get('start_scan')))
             if not title:
                 title = pep_info.get('start_scan', 'Unknown')
+            title = self._get_scan_from_string(title)
             pepObj.title = title
-            pepObj.id = title
-            pepObj.charge = pep_info.get('assumed_charge', 0)
-            pepObj.mass = float(pep_info.get('precursor_neutral_mass', 0))
+            pepObj.id = start_scan
+            charge = float(pep_info.get('assumed_charge', 0))
+            pepObj.charge = charge
+            mass = float(pep_info.get('precursor_neutral_mass', 0))
+            # this is the precursor neutral mass, we need m/z
+            pepObj.mass = (mass+(charge*config.HYDROGEN))/charge
             rt = float(pep_info.get('retention_time_sec', 0))
-            rt = '{0}.{1:02f}'.format(int(rt/60), int(rt%60))
+            rt = float(rt/60)+int(rt%60)/100.0
             pepObj.rt = rt
+            pepObj.file = self.mzml.filename.name
             # get our search result
             search_result = spectra.find('{0}search_result/'.format(namespace))
+            if search_result is None:
+                return None
             search_info = dict(search_result.items())
             rank = search_info.get('hit_rank', 0)
             peptide = search_info.get('peptide', 'X')
@@ -407,7 +414,7 @@ class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
                     mod_pos = int(mod_info['position'])-1
                     mod_aa = peptide[mod_pos]
                     pepObj.addModification(mod_aa, mod_pos, mod_info['mass'], mod_info['mass'])
-            self.scans[title] = pepObj
+            # self.scans[title] = pepObj
             # get our mz/intensities
             scanInfo = self.mzml.getScan(start_scan, peptide=peptide)
             pepObj.scans = scanInfo.scans
@@ -429,6 +436,18 @@ class PepXMLIterator(templates.GenericIterator, GenericProteomicIterator):
             sys.stderr.write('pepxml cannto find %s\n'%id)
             return None
 
+    def getScans(self, modifications=True, fdr=True):
+        """
+        get a random scan
+        """
+        if not self.scans:
+            for i in self:
+                yield i
+        else:
+            for i in self.scans.values():
+                yield i
+        yield None
+
 class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
     #TODO: Random access, fetch scan by id
     def __init__(self, filename, **kwargs):
@@ -446,7 +465,7 @@ class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
         self.store = kwargs.get('store', False)
         try:
             # find our peptides and process them first
-            peps = etree.iterparse(self.filename, tag=('PeptideItem',))
+            peps = etree.iterparse(self.filename.name, tag=('PeptideItem',))
             for tag, peptideXML in peps:
                 pepObj = PeptideObject()
                 peptide = peptideXML.find('Sequence').text
@@ -471,7 +490,7 @@ class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
                     pepObj.addModification(mod_aa, position, mod_name, mass)
                 self.peptides[spectrum] = pepObj
             self.filename.seek(0)
-            dom1 = etree.iterparse(self.filename, tag=('spectrum',))
+            dom1 = etree.iterparse(self.filename.name, tag=('spectrum',))
             self.lxml = True
         except NameError:
             self.lxml = False
@@ -540,7 +559,7 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename, **kwrds):
         super(XTandemXMLIterator, self).__init__(filename)
         # parse modifications
-        specs = [i[1] for i in etree.iterparse(self.filename, tag='group') if i[1].attrib.get('label') == 'input parameters'][0]
+        specs = [i[1] for i in etree.iterparse(self.filename.name, tag='group') if i[1].attrib.get('label') == 'input parameters'][0]
         # X!tandem will have definitions including carboxy methyl,etc. so we just search for K/R until there is a better solution
         # to definitively identify SILAC label schemes
         self.silac_labels = {'Light': {}}
@@ -1164,7 +1183,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.cur.execute(sql)
         for i in self.cur.fetchall():
             self.tmods[i[0]] = i[1:]
-        if peptide is not None and not isinstance(peptide, list):
+        if peptide is not None and not isinstance(peptide, (tuple, set, list)):
             peptide = [peptide]
         self.extra = 'and p.Sequence IN ({})'.format(','.join(['"{}"'.format(i) for i in peptide])) if peptide is not None else ''
         try:

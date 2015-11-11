@@ -7,21 +7,21 @@ import pythomics.proteomics.config as protein_config
 
 
 class GenericIterator(object):
-    gz = False
+    gzip = False
     CHUNK_SIZE = 2**16
     UNCONSUMED = ''
     contents = []
 
-    def __init__(self, filename, delimiter='\n', **kwrds):
+    def __init__(self, filename, delimiter='\n', *args, **kwargs):
         self.delimiter = delimiter
         if isinstance(filename, basestring) and filename.endswith('.gz'):
-            self.gz = True
+            self.gzip = True
             self.filename = gzip.GzipFile(filename)
         elif isinstance(filename, basestring):
             self.filename = open(filename)
         elif isinstance(filename, (file,)):
             if filename.name.endswith('.gz'):
-                self.gz = True
+                self.gzip = True
                 self.filename = gzip.GzipFile(filename.name)
             else:
                 self.filename = filename
@@ -32,7 +32,7 @@ class GenericIterator(object):
         return self
 
     def next(self):
-        if self.gz:
+        if self.gzip:
             if self.contents:
                 return self.contents.popleft()
             new_contents = self.filename.read(self.CHUNK_SIZE)

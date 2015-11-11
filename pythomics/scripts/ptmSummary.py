@@ -73,7 +73,6 @@ def main():
         wp_summary[quant_col] = pd.concat([wp[(wp_index, quant_col)] for wp_index, wp in enumerate(wp_reps)], axis=1).median(axis=1) if wp_reps else 0
     wp_medians = float(sum(wp_medians))/len(wp_medians) if wp_medians else 0
 
-
     # ptm stuff
     import copy
     from collections import OrderedDict
