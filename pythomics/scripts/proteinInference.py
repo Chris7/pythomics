@@ -276,6 +276,7 @@ def main():
             peptide_dict['inference'] = {'proteins': ''}
             if inference:
                 proteins = mapped_info['proteins']
+                accessions = mapped_info['accessions']
                 start_positions = mapped_info['positions'] if mod_site else []
                 proteins_mapped|=set(proteins)
                 if unique:
@@ -300,7 +301,7 @@ def main():
                     find_motif = False
                     if motif_search and (len(proteins) == 1 or not motif_unique):
                         find_motif = True
-                    for start_position, protein in zip(start_positions, proteins):
+                    for start_position, protein in zip(start_positions, accessions):
                         mod_site_addition = []
                         for j, k in enumerate(peptide):
                             if k.islower():
