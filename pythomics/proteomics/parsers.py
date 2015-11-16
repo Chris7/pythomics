@@ -189,7 +189,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
                     intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
                     intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
-                    scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
+                    scanObj.scans = zip(mzmls, intensities)
                 spectra.clear()
                 return scanObj
             elif spectra.tag == '{0}chromatogram'.format(namespace):
@@ -251,7 +251,12 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
 
     def next(self):
         if self.spectra:
-            spectra = self.spectra.next()
+            spectra = None
+            while spectra is None:
+                try:
+                    spectra = self.spectra.next()
+                except:
+                    pass
         else:
             raise StopIteration
         if self.gzip:
@@ -314,10 +319,10 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
                 junk, file_name = os.path.split(info['base_name'])
                 new_path = os.path.join(xml_path, file_name)
                 try:
-                    self.mzml = MZMLIterator('%s%s'%(new_path, info['raw_data_type']))
+                    self.mzml = MZMLIterator('%s%s'%(new_path, info['raw_data']))
                 except IOError:
                     # one more try for a gz
-                    self.mzml = MZMLIterator('%s%s.gz'%(new_path, info['raw_data_type']))
+                    self.mzml = MZMLIterator('%s%s.gz'%(new_path, info['raw_data']))
             self.filename.seek(0)
             dom1 = etree.iterparse(self.filename.name, tag=('{http://regis-web.systemsbiology.net/pepXML}spectrum_query',))
             self.lxml = True

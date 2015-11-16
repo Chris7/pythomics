@@ -2,7 +2,10 @@ HYDROGEN = 1.007825
 #NEUTRON = 1.008701
 # we use the mass of a neutron of c13
 NEUTRON = 1.003355
+# Neutrons with mass defects for a given element
 CARBON_NEUTRON = 1.003355
+HYDROGEN_NEUTRON = 1.006277
+NITROGEN_NEUTRON = 0.997035
 
 #We use X!Tandem notation for enzymatic digestion:
 #http://thegpm.org/TANDEM/api/pcs.html
@@ -115,16 +118,16 @@ MS1_SCHEMES = {
         'N14': {0: set([])},
         },
     'mTRAQ4':{
-        'Medium': {4.0071: set([']']), 4.0071: set(['K']), 4.0071*2: set(['R'])},
+        'Medium': {4.0071: set([']', 'K']), 4.0071*2: set(['R'])},
         'Light': {0: set([])}
     },
     'mTRAQ48':{
-        'Heavy': {8.014199: set([']']), 8.014199: set(['K']), 8.014199*2: set(['R'])},
-        'Medium': {4.0071: set([']']), 4.0071: set(['K']), 4.0071*2: set(['R'])},
+        'Heavy': {8.014199: set([']', 'K']), 8.014199*2: set(['R'])},
+        'Medium': {4.0071: set([']', 'K']), 4.0071*2: set(['R'])},
         'Light': {0: set([])}
     },
     'mTRAQ8':{
-        'Heavy': {8.014199: set([']']), 8.014199: set(['K']), 8.014199*2: set(['R'])},
+        'Heavy': {8.014199: set([']', 'K']), 8.014199*2: set(['R'])},
         'Light': {0: set([])}
     },
     'K6R6': {
