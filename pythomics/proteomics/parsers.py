@@ -94,17 +94,17 @@ class GuessIterator(templates.GenericIterator):
     def __init__(self, *args, **kwargs):
         super(GuessIterator, self).__init__(*args, **kwargs)
         filename = self.filename.name.lower()
-        if '.mzml' in filename:
+        if filename.endswith('.mzml'):
             self.parser = MZMLIterator
-        elif '.pepxml' in filename or '.pep.xml' in filename:
+        elif filename.endswith('.pepxml') or filename.endswith('.pep.xml'):
             self.parser = PepXMLIterator
-        elif '.xml' in filename:
+        elif filename.endswith('.xml'):
             self.parser = XTandemXMLIterator
-        elif '.mgf' in filename:
+        elif filename.endswith('.mgf'):
             self.parser = MGFIterator
-        elif '.dat' in filename:
+        elif filename.endswith('.dat'):
             self.parser = MascotDATIterator
-        elif '.msf' in filename or '.pdresult' in filename:
+        elif filename.endswith('.msf') or filename.endswith('.pdresult'):
             self.parser = ThermoMSFIterator
         self.parser = self.parser(*args, **kwargs)
         private = {'__iter__',}
@@ -166,6 +166,10 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
                 scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
                 precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursorList/{0}precursor/{0}selectedIonList/{0}selectedIon/{0}cvParam'.format(namespace))])
+                parent_scan = spectra.findall('{0}precursorList/{0}precursor'.format(namespace))
+                if parent_scan:
+                    parent_scan = self._get_scan_from_string(parent_scan[0].get('spectrumRef'))
+                    scanObj.parent = parent_scan
                 # print 'spectra info', spectra_info
                 # print 'spectra params', spectra_params
                 # print 'our scan info', scan_info
@@ -251,12 +255,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
 
     def next(self):
         if self.spectra:
-            spectra = None
-            while spectra is None:
-                try:
-                    spectra = self.spectra.next()
-                except:
-                    pass
+            spectra = self.spectra.next()
         else:
             raise StopIteration
         if self.gzip:
@@ -1077,8 +1076,6 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                         chargeRule = 0
                         matched = {'labels':[],'m/z': [], 'intensity': [], 'error': [], 'series': [], 'start': [], 'end': [], 'losses': [], 'charge': []}
                         for rule in (int(arule) for arule in rules):
-#                            print 'looking at rule',rule
-#                            print 'crules',self.cRules
                             if rule == 1:
                                 chargeRule = 1
                             elif rule == 2 or rule == 3:
@@ -1086,7 +1083,6 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                                     chargeRule = 2
                             else:
                                 for chargeState in xrange(charge+1):
-#                                    print 'checking chargestate',chargeState,'with chargerule',chargeRule,'on rule',rule
                                     if (chargeState == 1 and chargeRule == 1) or (chargeState == 2 and chargeRule == 2) and rule not in self.cRules:
                                         frags = msparser.ms_fragmentvector()
                                         errs = msparser.ms_errs()
@@ -1180,7 +1176,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.scans = []
         self.scanTable = {}
         for i in self.cur.fetchall():
-            self.modTable[i[0]] = (i[1],i[2])
+            self.modTable[str(i[0])] = (i[1],i[2])
         self.aaTable = dict([(i[0],i[1]) for i in self.conn.execute("select aa.AminoAcidID, aa.OneLetterCode from aminoacids aa").fetchall()])
         #We fetch all modifications here for temporary storage because it is VERY expensive to query peptide by peptide (3 seconds per 100 on my 500 MB test file, with 300,000 scans that's horrid)
         sql = 'select pam.PeptideID, GROUP_CONCAT(pam.AminoAcidModificationID), GROUP_CONCAT(pam.Position) from peptidesaminoacidmodifications pam GROUP BY pam.PeptideID'
@@ -1412,12 +1408,14 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             mods = self.mods.get(int(pepId))
             if mods is not None:
                 for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
-                    modEntry = self.modTable[int(modId)]
+                    modEntry = self.modTable[str(modId)]
                     scanObj.addModification(sequence[int(modPosition)], modPosition, modEntry[1], modEntry[0])
             tmods = self.tmods.get(int(pepId), [])
-            for modId in tmods:
-                modEntry = self.modTable[int(modId)]
-                scanObj.addModification('[', 0, modEntry[1], modEntry[0])
+            for modIds in tmods:
+                for modId in modIds.split(','):
+                    modEntry = self.modTable[str(modId)]
+                    print modEntry
+                    scanObj.addModification('[', 0, modEntry[1], modEntry[0])
             scanObj.peptide = sequence
             scanObj.rank = searchRank
             scanObj.confidence = confidence
@@ -1452,13 +1450,14 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             mods = self.mods.get(int(pid))
             if mods is not None:
                 for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
-                    modEntry = self.modTable[int(modId)]
+                    modEntry = self.modTable[str(modId)]
                     scanObj.addModification(peptide[int(modPosition)], modPosition, modEntry[1], modEntry[0])
             tmods = self.tmods.get(int(pid))
             if tmods is not None:
-                for modId in tmods:
-                    modEntry = self.modTable[int(modId)]
-                    scanObj.addModification('[', 0, modEntry[1], modEntry[0])
+                for modIds in tmods:
+                    for modId in modIds.split(','):
+                        modEntry = self.modTable[str(modId)]
+                        scanObj.addModification('[', 0, modEntry[1], modEntry[0])
         scanObj.peptide = peptide
         if self.decompressScanInfo(scanObj, i[0]):
             return scanObj
@@ -1682,7 +1681,7 @@ class MQIterator(templates.GenericIterator, GenericProteomicIterator):
                 mods = self.mods[int(pepId)]
                 # print mods
                 for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
-                    modEntry = self.modTable[int(modId)]
+                    modEntry = self.modTable[str(modId)]
                     scanObj.addModification(sequence[int(modPosition)], modPosition, modEntry[1], modEntry[0])
             except KeyError:
                 pass
