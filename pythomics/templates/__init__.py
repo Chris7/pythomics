@@ -69,7 +69,7 @@ class CustomParser(argparse.ArgumentParser):
         self.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
         self.add_argument('--max', help="Maximum cleavage length", type=int, default=30)
 
-    def add_delimited_file(self, files=None, delimiter=None, cols=None, header=None, help="The delimited file."):
+    def add_delimited_file(self, files=None, delimiter=None, cols=None, col_default=1, header=None, help="The delimited file."):
         if files is None:
             files = ['-t', '--tsv']
         if delimiter is None:
@@ -80,7 +80,7 @@ class CustomParser(argparse.ArgumentParser):
             header = ['--header']
         self.add_argument(*files, help=help, type=argparse.FileType('r'), required=True)
         self.add_argument(*delimiter, help="The delimiter for fields.", type=str, default='\t')
-        self.add_argument(*cols, help="The column of interest (default: 1). Can be a column name.", type=str, default=1)
+        self.add_argument(*cols, help="The column of interest (default: 1). Can be a column name.", type=str, default=col_default)
         self.add_argument(*header, help="The number of headers lines (default: 1).", type=int, default=1)
 
     def add_fasta(self, help="The fasta file to operate on."):

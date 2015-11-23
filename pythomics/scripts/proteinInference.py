@@ -27,7 +27,7 @@ parser.add_out(help="The name of the file you wish to create with results append
 parser.add_argument('--peptide-out', nargs='?', help="The file to write digested products to.", type=argparse.FileType('w'), default=os.devnull)
 parser.add_argument('--protein-out', nargs='?', help="The file to write grouped products to.", type=argparse.FileType('w'), default=os.devnull)
 parser.add_argument('--strict', help='For numeric operations, fail if types are incorrect (converting NA to a float for instance).', action='store_true')
-parser.add_delimited_file()
+parser.add_delimited_file(cols=['--peptide-col'], col_default='Peptide')
 parser.add_argument('-r', '--regex', help="A perl regular expression determining which parts of the header to capture.", type=str)
 parser.add_argument('--inferred-name', help="The name you want to assign for protein inference (in case you are regexing for gene names or something).", type=str, default='Proteins')
 parser.add_argument('--no-inference', help="Do not append proteins inferred from sequences.", action='store_true')
@@ -86,11 +86,28 @@ def make_unique(l):
 
 # @profile(print_stats=10, dump_stats=True)
 def mapper(peptides):
-    pep_format = r'(.+?)\t[^\n]+?({})'
-    matches = [{'peptide': i.group(2), 'peptide_start': i.start(2), 'accession': i.group(1)}
-               for j in peptides
-               for i in re.finditer(pep_format.format(j.upper().replace('L', '!').replace('!', '[IL]')), protein_sequences)]
-    matches.sort(key=lambda x: x['peptide_start'])
+    #pep_format = r'(.+?)\t[^\n]+?({})'
+    # pep_format = r'^([^\n]+)\t[^\n]+?({})'
+    # matches = [{'peptide': i.group(2), 'peptide_start': i.start(2), 'accession': i.group(1)}
+    #            for j in peptides
+    #            for i in re.finditer(pep_format.format(j.upper().replace('L', '!').replace('!', '[IL]')), protein_sequences, re.M)]
+    sequences = protein_sequences.replace('I', 'L')
+    matches = []
+    for j in peptides:
+        pep_match = j.upper().replace('L','I')
+        pos_start = 0
+        pos = sequences.find(pep_match)
+        peptide_offset = -1
+        while pos != -1:
+            accession_end = sequences[:peptide_offset].rfind('\t')
+            accession_start = sequences[:accession_end].rfind('\n')+1
+            accession = protein_sequences[accession_start:accession_end]
+            peptide_offset = pos_start+pos
+            d = {'peptide': j, 'peptide_start': peptide_offset, 'accession': accession}
+            matches.append(d)
+            pos_start += pos+1
+            pos = sequences[pos_start:].find(pep_match)
+    matches.sort(key=operator.itemgetter('peptide', 'peptide_start'))
     groups = itertools.groupby(matches, key=lambda x: x['peptide'])
     matched = {}
     for peptide, peptide_grouped in groups:
@@ -116,8 +133,6 @@ def mapper(peptides):
         }
     return matched
 
-
-
 def main():
     global protein_sequences
     global fasta_headers
@@ -126,10 +141,12 @@ def main():
     args = parser.parse_args()
     cores = args.p
     fasta_file = fasta.FastaIterator(args.fasta)
+    peptide_column = args.peptide_col
     try:
-        peptide_column = int(args.col)-1
-    except:
-        peptide_column = None
+        peptide_index = int(peptide_column)-1
+        peptide_column = peptide_index
+    except ValueError:
+        peptide_index = None
     tsv_file = args.tsv
     il_convert = not args.no_equality
     out_file = args.out
@@ -190,9 +207,9 @@ def main():
         reader = csv.reader(f, delimiter=delimiter)
         for line_num, entry in enumerate(reader):
             if line_num < header_lines:# we assume the first header line is the one we care about
-                if peptide_column is None:
+                if peptide_index is None:
                     for i,v in enumerate(entry):
-                        if v.lower() == args.col.lower():
+                        if v.lower() == args.peptide_col.lower():
                             peptide_column = i
                             break
                 if mod_col is not None and mod_col.isdigit():
