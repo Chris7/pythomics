@@ -97,7 +97,7 @@ def mapper(peptides):
         pep_match = j.upper().replace('L','I')
         pos_start = 0
         pos = sequences.find(pep_match)
-        peptide_offset = -1
+        peptide_offset = pos
         while pos != -1:
             accession_end = sequences[:peptide_offset].rfind('\t')
             accession_start = sequences[:accession_end].rfind('\n')+1
