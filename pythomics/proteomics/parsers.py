@@ -22,7 +22,11 @@ from os import path
 import pythomics.templates as templates
 from pythomics.proteomics.structures import PeptideObject, ScanObject, Chromatogram
 from pythomics.proteomics import config
-import re, os, sqlite3, StringIO, zipfile, time
+import re, os, sqlite3, zipfile, time
+import six
+if six.PY3:
+    xrange = range
+from six import string_types
 try:
     from lxml import etree
 except ImportError:
@@ -170,10 +174,6 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 if parent_scan:
                     parent_scan = self._get_scan_from_string(parent_scan[0].get('spectrumRef'))
                     scanObj.parent = parent_scan
-                # print 'spectra info', spectra_info
-                # print 'spectra params', spectra_params
-                # print 'our scan info', scan_info
-                # print 'our precursor info', precursor_info
                 ms_level = int(spectra_params.get('ms level', 0))
                 charge = precursor_info.get('charge state', 0)
                 precursor_ion = precursor_info.get('selected ion m/z', 0)
@@ -193,7 +193,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
                     intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
                     intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
-                    scanObj.scans = zip(mzmls, intensities)
+                    scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
                 spectra.clear()
                 return scanObj
             elif spectra.tag == '{0}chromatogram'.format(namespace):
@@ -255,7 +255,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
 
     def next(self):
         if self.spectra:
-            spectra = self.spectra.next()
+            spectra = next(self.spectra)
         else:
             raise StopIteration
         if self.gzip:
@@ -376,7 +376,6 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
             for i in analysis:
                 info = dict(i.items())
                 analysis_type = info.get('analysis', False)
-                # print analysis_type
                 if analysis_type == 'peptideprophet':
                     results = i.find('{0}peptideprophet_result'.format(namespace))
                     prophet_info = dict(results.items())
@@ -389,7 +388,6 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
                     results = i.find('{0}ptmprophet_result'.format(namespace))
                     ptm_info = dict(results.items())
                     probs = results.findall('{0}mod_aminoacid_probability'.format(namespace))
-                    # print ptm_info
                     mod_mass = self.ptm_regex.match(ptm_info['ptm']).group(1)
                     for prob in probs:
                         prob_info = dict(prob.items())
@@ -418,8 +416,6 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
                 mods = search_result.findall('{0}mod_aminoacid_mass'.format(namespace))
                 for i in mods:
                     mod_info = dict(i.items())
-                    # print i.items()
-                    # print mod_info
                     mod_pos = int(mod_info['position'])-1
                     mod_aa = peptide[mod_pos]
                     pepObj.addModification(mod_aa, mod_pos, mod_info['mass'], mod_info['mass'])
@@ -780,7 +776,6 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
         foundTitle = False
         scanObj = ScanObject()
         scanObj.ms_level = 2
-#        print 'stuff in scan',scan
         for row in scan.split('\n'):
             if not row:
                 continue
@@ -970,7 +965,6 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
         modind=1
         mod = self.resfile.getSectionValueStr(msparser.ms_mascotresfile.SEC_MASSES, "delta%d"%modind)
         while mod:
-            # print mod
             modind+=1
             mod = self.resfile.getSectionValueStr(msparser.ms_mascotresfile.SEC_MASSES, "delta%d"%modind)
         self.aahelper = msparser.ms_aahelper(self.resfile, "enzymes.txt")
@@ -1086,7 +1080,6 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                                     if (chargeState == 1 and chargeRule == 1) or (chargeState == 2 and chargeRule == 2) and rule not in self.cRules:
                                         frags = msparser.ms_fragmentvector()
                                         errs = msparser.ms_errs()
-                                        #print pep, rule, chargeState, 0, pep.getMrCalc(), self.sparams.getMassType(), frags, errs
                                         self.aahelper.setMasses(self.massFile)
                                         self.aahelper.setAvailableModifications(self.vecFixed,self.vMods)
                                         fres = self.aahelper.calcFragmentsEx(pep, rule, chargeState, 0, pep.getMrCalc(), self.sparams.getMassType(), frags, errs)
@@ -1122,7 +1115,6 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                                                 fragname = ""
                                             sys.stderr.write('fragment name%s\n'%fragname)
                         scanObj.matched = matched
-#                        print matched
                     specId = self.specParse.search(stitle).group(1)
                     scanObj.id = specId
                     self.scanMap[(specId, peptide)] = scanObj
@@ -1139,7 +1131,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.clvl = clvl
         self.full = full
         self.srank = srank
-        if isinstance(filename,(str,unicode)):
+        if isinstance(filename, string_types):
             self.f = open(filename, 'rb')
         else:
             raise Exception(TypeError,"Unknown Type of filename -- must be a file path")
@@ -1212,7 +1204,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
 
     def getSILACLabels(self):
         labels = {}
-        import HTMLParser
+        from six.moves import html_parser as HTMLParser
         html_parser = HTMLParser.HTMLParser()
         if self.version == 1:
             sql = 'select ParameterValue from processingnodeparameters where ParameterName == "QuantificationMethod"'
@@ -1245,7 +1237,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.cur.execute(sql)
         for chroma in self.cur.fetchall():
             sInfo = chroma[2]
-            fp = StringIO.StringIO(sInfo)
+            fp = six.BytesIO(sInfo)
             zf = zipfile.ZipFile(fp, 'r')
             for j in zf.namelist():
                 msInfo = zf.read(j)
@@ -1327,15 +1319,13 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
 
     def decompressScanInfo(self, scanObj, zip):
         sInfo = zip
-        fp = StringIO.StringIO(sInfo)
+        fp = six.BytesIO(sInfo)
         zf = zipfile.ZipFile(fp, 'r')
         for j in zf.namelist():
-            msInfo = zf.read(j)
+            msInfo = zf.read(j).decode()
             msStr = msInfo.split('\n')
-            #sIO = StringIO.StringIO('\n'.join(msStr[1:]))
             stage = 0
             #this is dirty, but unfortunately the fastest method at the moment
-            # print msInfo
             ms1_scans = []
             for row in msStr:
                 if stage == 0:
@@ -1414,7 +1404,6 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             for modIds in tmods:
                 for modId in modIds.split(','):
                     modEntry = self.modTable[str(modId)]
-                    print modEntry
                     scanObj.addModification('[', 0, modEntry[1], modEntry[0])
             scanObj.peptide = sequence
             scanObj.rank = searchRank
@@ -1529,7 +1518,7 @@ class MQIterator(templates.GenericIterator, GenericProteomicIterator):
         self.cur.execute(sql)
         for chroma in self.cur.fetchall():
             sInfo = chroma[2]
-            fp = StringIO.StringIO(sInfo)
+            fp = six.BytesIO(sInfo)
             zf = zipfile.ZipFile(fp, 'r')
             for j in zf.namelist():
                 msInfo = zf.read(j)
@@ -1597,15 +1586,13 @@ class MQIterator(templates.GenericIterator, GenericProteomicIterator):
 
     def decompressScanInfo(self, scanObj, zip):
         sInfo = zip
-        fp = StringIO.StringIO(sInfo)
+        fp = six.BytesIO(sInfo)
         zf = zipfile.ZipFile(fp, 'r')
         for j in zf.namelist():
             msInfo = zf.read(j)
             msStr = msInfo.split('\n')
-            #sIO = StringIO.StringIO('\n'.join(msStr[1:]))
             stage = 0
             #this is dirty, but unfortunately the fastest method at the moment
-            # print msInfo
             ms1_scans = []
             for row in msStr:
                 if stage == 0:
@@ -1650,7 +1637,6 @@ class MQIterator(templates.GenericIterator, GenericProteomicIterator):
                     elif '</PeakCentroids>' in row:
                         break
         if msInfo:
-	    # print scanObj.scans
             if master_scan != "-1" and ms1_scans:
                 master_scanobj = self.master_scans.get(master_scan, None)
                 if master_scanobj is None:
@@ -1679,7 +1665,6 @@ class MQIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj = PeptideObject()
             try:
                 mods = self.mods[int(pepId)]
-                # print mods
                 for modId, modPosition in zip(mods[0].split(','),mods[1].split(',')):
                     modEntry = self.modTable[str(modId)]
                     scanObj.addModification(sequence[int(modPosition)], modPosition, modEntry[1], modEntry[0])

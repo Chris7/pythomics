@@ -3,6 +3,9 @@ import argparse
 import sys
 from distutils import spawn
 from collections import deque
+
+from six import string_types
+
 import pythomics.proteomics.config as protein_config
 
 
@@ -14,10 +17,10 @@ class GenericIterator(object):
 
     def __init__(self, filename, delimiter='\n', *args, **kwargs):
         self.delimiter = delimiter
-        if isinstance(filename, basestring) and filename.endswith('.gz'):
+        if isinstance(filename, string_types) and filename.endswith('.gz'):
             self.gzip = True
             self.filename = gzip.GzipFile(filename)
-        elif isinstance(filename, basestring):
+        elif isinstance(filename, string_types):
             self.filename = open(filename)
         elif isinstance(filename, (file,)):
             if filename.name.endswith('.gz'):
@@ -55,6 +58,9 @@ class GenericIterator(object):
                 return self.contents.popleft()
         else:
             return self.filename.next().strip()
+
+    def __next__(self):
+        return self.next()
 
 
 class CustomParser(argparse.ArgumentParser):
