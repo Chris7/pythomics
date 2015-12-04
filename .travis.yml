@@ -27,15 +27,3 @@ python:
 after_success:
   coveralls
 
-
-python:
-  - "2.7"
-  - "3.3"
-  - "3.4"
-# command to install dependencies
-inst
-# command to run tests
-script: make test
-after_success:
-  - coveralls
-
