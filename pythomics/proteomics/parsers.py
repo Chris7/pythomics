@@ -24,6 +24,7 @@ from pythomics.proteomics.structures import PeptideObject, ScanObject, Chromatog
 from pythomics.proteomics import config
 import re, os, sqlite3, zipfile, time
 import six
+
 if six.PY3:
     xrange = range
 from six import string_types
@@ -155,9 +156,9 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         else:
             array = base64.b64decode(array)
         if '64-bit float' in params:
-            array = [struct.unpack('d', array[i:i+8])[0] for i in xrange(0, len(array), 8)]
+            array = struct.unpack('{}d'.format(len(array)/8), array)
         else:
-            array = [struct.unpack('f', array[i:i+4])[0] for i in xrange(0, len(array), 4)]
+            array = struct.unpack('{}f'.format(len(array)/4), array)
         return array
 
     def parselxml(self, spectra, full=False, namespace='{http://psi.hupo.org/ms/mzml}'):
