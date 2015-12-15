@@ -46,6 +46,8 @@ class GenericProteomicIterator(object):
     """
     Generics to be overridden
     """
+    chromatogram = None
+
     def getChromatogram(self):
         pass
 
@@ -137,7 +139,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         self.start = start
         spectra_tags = ('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram')
         self.filename.seek(0)
-        self.spectra = etree.parse(self.filename.name).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename.name, tag=spectra_tags)
+        self.spectra = etree.parse(self.filename).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename, tag=spectra_tags, recover=True)
         self.scans = {}
         self.ra = {}
         self.startIter = True
@@ -162,7 +164,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         try:
             if spectra.tag == '{0}indexedmzML'.format(namespace):
                 # read our index in
-                self.ra = dict([(self._get_scan_from_string(i.values()[0]), i.text) for i in spectra.findall('{0}indexList/{0}index/'.format(namespace))])
+                self.ra.update(dict([(self._get_scan_from_string(i.values()[0]), i.text) for i in spectra.findall('{0}indexList/{0}index/'.format(namespace))]))
                 return None
             elif spectra.tag == '{0}spectrum'.format(namespace):
                 scanObj = ScanObject()
@@ -195,6 +197,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
                     scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
                 spectra.clear()
+                self.ra.update({title: self.previous_offset})
                 return scanObj
             elif spectra.tag == '{0}chromatogram'.format(namespace):
                 if spectra.get('id') == 'TIC':
@@ -254,6 +257,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         #     raise StopIteration
 
     def next(self):
+        self.previous_offset = self.filename.tell()
         if self.spectra:
             spectra = next(self.spectra)
         else:
@@ -262,9 +266,9 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
             scan = self.parselxml(spectra, full=True)
             if self.store and isinstance(scan, ScanObject):
                 self.scans[scan.id] = scan
-            return scan
         else:
-            return self.parselxml(spectra[1], full=self.full)
+            scan = self.parselxml(spectra[1], full=self.full)
+        return scan
 
     def getChromatogram(self):
         return self.chromatogram
@@ -282,14 +286,20 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 if id in self.scans:
                     return self.scans[id]
             else:
-                if not self.ra:
-                    [i for i in self]
+                while id not in self.ra:
+                    spectra = self.next()
+                    if spectra.id == id:
+                        return spectra
                 self.filename.seek(int(self.ra[str(id)]))
                 entry = self.filename.readline()
-                opening_tag = entry[1:entry.find(' ')]
-                closing_tag = '</{}'.format(opening_tag)
+                opening_tag = '<spectrum '
+                closing_tag = '</spectrum>'
+                while entry and opening_tag not in entry:
+                    entry = self.filename.readline()
+                if not entry:
+                    return None
                 row = [entry]
-                while closing_tag not in entry:
+                while entry and closing_tag not in entry:
                     entry = self.filename.readline()
                     row.append(entry)
                 spectra = etree.fromstring(''.join(row))
