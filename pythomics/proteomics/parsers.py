@@ -197,7 +197,8 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
                     scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
                 spectra.clear()
-                self.ra.update({title: self.previous_offset})
+                if title not in self.ra:
+                    self.ra.update({title: self.previous_offset})
                 return scanObj
             elif spectra.tag == '{0}chromatogram'.format(namespace):
                 if spectra.get('id') == 'TIC':
