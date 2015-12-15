@@ -43,6 +43,24 @@ scanSplitter = re.compile(r'[\t\s]')
 distillerParse = re.compile(r'_DISTILLER_RAWFILE\[(\d+)\]=\(1\)(.+)')
 lastSplit = re.compile(r'.+[/\\](.+)')
 
+# def line_profiler(view=None, extra_view=None):
+#     import line_profiler
+#
+#     def wrapper(view):
+#         def wrapped(*args, **kwargs):
+#             prof = line_profiler.LineProfiler()
+#             prof.add_function(view)
+#             if extra_view:
+#                 [prof.add_function(v) for v in extra_view]
+#             with prof:
+#                 resp = view(*args, **kwargs)
+#             prof.print_stats()
+#             return resp
+#         return wrapped
+#     if view:
+#         return wrapper(view)
+#     return wrapper
+
 class GenericProteomicIterator(object):
     """
     Generics to be overridden
@@ -196,7 +214,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
                     intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
                     intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
-                    scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
+                    scanObj.scans = list(zip(mzmls, intensities))
                 spectra.clear()
                 if title not in self.ra:
                     self.ra.update({title: self.previous_offset})
@@ -248,8 +266,10 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                         mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
                         intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
                         intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
-                        scanObj.scans = [(i,j) for i,j in zip(mzmls, intensities)]
+                        scanObj.scans = list(zip(mzmls, intensities))
                     spectra.clear()
+                    if title not in self.ra:
+                        self.ra.update({title: self.previous_offset})
                     return scanObj
         except:
             import traceback
