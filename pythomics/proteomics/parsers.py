@@ -215,6 +215,9 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
                     intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
                     scanObj.scans = list(zip(mzmls, intensities))
+                if self.filetype == 'thermo':
+                    target_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursorList/{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
+                    scanObj.product_ion = target_info.get('isolation window target m/z', 0)
                 spectra.clear()
                 if title not in self.ra:
                     self.ra.update({title: self.previous_offset})
