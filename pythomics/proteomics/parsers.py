@@ -156,11 +156,18 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         self.full = full
         self.ms_filter = ms_filter
         self.start = start
-        spectra_tags = ('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram')
+        spectra_tags = ('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}chromatogram')
+        self.filename.seek(0)
+        self.spectra = etree.parse(self.filename).iter(tag=('{http://psi.hupo.org/ms/mzml}indexedmzML',)) if self.gzip else etree.iterparse(self.filename, tag=('{http://psi.hupo.org/ms/mzml}indexedmzML',), recover=True)
+        index = next(self.spectra)
+        if index:
+            self.ra = dict([(self._get_scan_from_string(i.values()[0]), i.text) for i in index[1].findall('{0}indexList/{0}index/'.format('{http://psi.hupo.org/ms/mzml}'))])
+        else:
+            print('mzML index is missing. Please provide files with an index.')
+            self.ra = {}
         self.filename.seek(0)
         self.spectra = etree.parse(self.filename).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename, tag=spectra_tags, recover=True)
         self.scans = {}
-        self.ra = {}
         self.startIter = True
         self.db = None
             
@@ -181,11 +188,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
 
     def parselxml(self, spectra, full=False, namespace='{http://psi.hupo.org/ms/mzml}'):
         try:
-            if spectra.tag == '{0}indexedmzML'.format(namespace):
-                # read our index in
-                self.ra.update(dict([(self._get_scan_from_string(i.values()[0]), i.text) for i in spectra.findall('{0}indexList/{0}index/'.format(namespace))]))
-                return None
-            elif spectra.tag == '{0}spectrum'.format(namespace):
+            if spectra.tag == '{0}spectrum'.format(namespace):
                 scanObj = ScanObject()
                 # spectra_info = dict(zip(spectra.keys(),spectra.values()))
                 spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
@@ -219,8 +222,6 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     target_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursorList/{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
                     scanObj.product_ion = target_info.get('isolation window target m/z', 0)
                 spectra.clear()
-                if title not in self.ra:
-                    self.ra.update({title: self.previous_offset})
                 return scanObj
             elif spectra.tag == '{0}chromatogram'.format(namespace):
                 if spectra.get('id') == 'TIC':
@@ -271,8 +272,6 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                         intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
                         scanObj.scans = list(zip(mzmls, intensities))
                     spectra.clear()
-                    if title not in self.ra:
-                        self.ra.update({title: self.previous_offset})
                     return scanObj
         except:
             import traceback
@@ -282,7 +281,6 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         #     raise StopIteration
 
     def next(self):
-        self.previous_offset = self.filename.tell()
         if self.spectra:
             spectra = next(self.spectra)
         else:
