@@ -183,9 +183,9 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         else:
             array = base64.b64decode(array)
         if '64-bit float' in params:
-            array = struct.unpack('{}d'.format(len(array)/8), array)
+            array = struct.unpack('{}d'.format(int(len(array)/8)), array)
         else:
-            array = struct.unpack('{}f'.format(len(array)/4), array)
+            array = struct.unpack('{}f'.format(int(len(array)/4)), array)
         return array
 
     def parselxml(self, spectra, full=False, namespace='{http://psi.hupo.org/ms/mzml}'):
