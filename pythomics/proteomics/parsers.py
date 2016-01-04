@@ -331,8 +331,8 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     row.append(entry)
                 spectra = cetree.fromstring(''.join(row))
             return self.parselxml(spectra, full=True, namespace='')
-        except IndexError:
-            sys.stderr.write('mzml cannot find %s\n'%id)
+        except:
+            sys.stderr.write('Unable to parse scan {}:\n{}\n'.format(id, traceback.format_exc()))
             return None
 
 class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.GenericIterator):
