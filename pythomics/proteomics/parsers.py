@@ -89,7 +89,7 @@ class XMLFileNameMixin(object):
         else:
             file_info = etree.iterparse(self.filename.name, tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
         self.filetype = None
-        identifiers = [('thermo raw', 'thermo'), ('abi wiff file', 'wiff')]
+        identifiers = [('thermo raw', 'thermo'), ('abi wiff file', 'wiff'), ('agilent masshunter format', 'masshunter')]
         for filenode in file_info:
             filetag = filenode[1]
             file_params = dict([(i.get('name'), i.get('value')) for i in filetag.findall('{0}cvParam'.format('{http://psi.hupo.org/ms/mzml}'))])
@@ -114,6 +114,11 @@ class XMLFileNameMixin(object):
                 right = value[left:].find(' ')
                 right = -1 if right == -1 else right+left
                 return value[left:right] if right != -1 else value[left:]
+        if self.filetype == 'masshunter':
+            try:
+                return dict([i.split('=') for i in value.split(' ')]).get('scanId', 'No Title')
+            except:
+                pass
         return value
 
 class GuessIterator(templates.GenericIterator):
