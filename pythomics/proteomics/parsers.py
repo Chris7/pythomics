@@ -1248,6 +1248,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         labels = {}
         from six.moves import html_parser as HTMLParser
         html_parser = HTMLParser.HTMLParser()
+        silac = None
         if self.version == 1:
             sql = 'select ParameterValue from processingnodeparameters where ParameterName == "QuantificationMethod"'
             self.cur.execute(sql)
@@ -1259,6 +1260,8 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                     silac = etree.fromstring(str(xml).encode('utf-16'))
         elif self.version == 2:
             silac = etree.fromstring([i for i in self.root.iterdescendants('QuantitationMethod')][0].text.encode('utf-16'))
+        if silac is None:
+            return labels
         for method in silac.findall('*MethodPart'):
             if self.version == 1 and method.getparent().get('name') != 'QuanChannels':
                 continue
