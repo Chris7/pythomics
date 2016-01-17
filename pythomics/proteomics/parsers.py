@@ -103,7 +103,7 @@ class XMLFileNameMixin(object):
     def _get_scan_from_string(self, value, scan=None):
         if self.filetype == 'thermo':
             try:
-                return dict([i.split('=') for i in value.split(' ')]).get('scan', 'No Title')
+                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scan', 'No Title')
             except:
                 pass
         if self.filetype == 'wiff':
@@ -116,7 +116,7 @@ class XMLFileNameMixin(object):
                 return value[left:right] if right != -1 else value[left:]
         if self.filetype == 'masshunter':
             try:
-                return dict([i.split('=') for i in value.split(' ')]).get('scanId', 'No Title')
+                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scanId', 'No Title')
             except:
                 pass
         return value
@@ -154,7 +154,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
          I just need a parser right now so the specs might not be exactly correct
 
         The returned items are ScanObjects
-        
+
         """
         super(MZMLIterator, self).__init__(filename)
         self.scans = {}
@@ -165,21 +165,75 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         self.filename.seek(0)
         self.spectra = cetree.parse(self.filename).iter() if self.gzip else cetree.iterparse(self.filename)
         self.ra = {}
+        duplicate_values = set([])
+        invalid_index = False
         for event, element in self.spectra:
             if element.tag.endswith('offset'):
                 self.ra[self._get_scan_from_string(element.get('idRef'))] = element.text
+                if element.text in duplicate_values:
+                    invalid_index = True
+                    break
+                duplicate_values.add(element.text)
             element.clear()
-        if not self.ra:
-            print('mzML index is missing. Please provide files with an index.')
+        if not self.ra or invalid_index:
+            if invalid_index:
+                print('mzML index contains duplicate values. Please rebuild index. Building a new index in memory.')
+            else:
+                print('mzML index is missing. Please provide files with an index. Building index in memory.')
+            self.ra = self.build_index(self.filename)
         del self.spectra
         self.filename.seek(0)
         self.spectra = cetree.parse(self.filename).iter() if self.gzip else cetree.iterparse(self.filename)
         self.scans = {}
         self.startIter = True
         self.db = None
-            
+
     def __iter__(self):
         return self
+
+    def find_tags(self, text, tag):
+        open = '<'+tag+' '
+        pos = text.find(open)
+        start_pos, end_pos = -1, -1
+        if pos != -1:
+            start_pos = pos
+            end = '</'+tag+'>'
+            pos = text.find(end)
+            if pos != -1:
+                end_pos = pos+len(end)
+        return (start_pos, end_pos, tag)
+
+    def build_index(self, file_obj):
+        file_obj.seek(0)
+        new_index = {}
+        character_count = 0
+        UNCONSUMED = ''
+        while True:
+            i = UNCONSUMED+file_obj.read(2**16)
+            UNCONSUMED  = ''
+            if i == '':
+                break
+            while i:
+                start, end, tag = self.find_tags(i, 'spectrum')
+                if start == -1:
+                    start, end, tag = self.find_tags(i, 'chromatogram')
+                if start == -1:
+                    character_count += len(i)
+                    i = ''
+                    continue
+                start_tag_end = i[start:].find('>\n')
+                if start_tag_end == -1:
+                    UNCONSUMED = i
+                    i = ''
+                    character_count += len(i)
+                    continue
+                tag_header = i[start:start+start_tag_end]+'></'+tag+'>'
+                scanId = self._get_scan_from_string(cetree.fromstring(tag_header).get('id'))
+                new_index[scanId] = character_count+start
+                character_count += start+1
+                i = i[start+1:]
+        file_obj.seek(0)
+        return new_index
 
     def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
         if 'zlib compression' in params:
