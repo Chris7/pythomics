@@ -37,6 +37,8 @@ class ScanObject(object):
         self._rawId = None
         self.parent = None
 
+        self.centroid = False
+
         #SRM/MRM parameters
         self.product_ion = 0
 

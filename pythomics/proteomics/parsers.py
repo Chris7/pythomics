@@ -202,6 +202,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 rt = scan_info.get('scan start time', 0)
                 # rt_length = scan_info.get('ion injection time', 0)
                 scanObj.ms_level = ms_level
+                scanObj.centroid = 'centroid spectrum' in spectra_params
                 scanObj.mass = float(precursor_ion)
                 scanObj.charge = charge
                 title = self._get_scan_from_string(spectra.get('id'))#
