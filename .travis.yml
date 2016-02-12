@@ -15,7 +15,7 @@ install:
   - sudo pip install -q -r requirements.txt
   - sudo pip install -q -e .
 script:
-  - make test
+  #- make test
   - nosetests -vv --exclude=test_script.*.py --with-coverage --cover-tests --cover-package=pythomics
   - coverage report -m
 language:

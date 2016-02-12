@@ -28,6 +28,7 @@ import six
 if six.PY3:
     xrange = range
 from six import string_types
+import xml.etree.cElementTree as cetree
 try:
     from lxml import etree
 except ImportError:
@@ -88,7 +89,7 @@ class XMLFileNameMixin(object):
         else:
             file_info = etree.iterparse(self.filename.name, tag=('{http://psi.hupo.org/ms/mzml}sourceFile',))
         self.filetype = None
-        identifiers = [('thermo raw', 'thermo'), ('abi wiff file', 'wiff')]
+        identifiers = [('thermo raw', 'thermo'), ('abi wiff file', 'wiff'), ('agilent masshunter format', 'masshunter')]
         for filenode in file_info:
             filetag = filenode[1]
             file_params = dict([(i.get('name'), i.get('value')) for i in filetag.findall('{0}cvParam'.format('{http://psi.hupo.org/ms/mzml}'))])
@@ -102,7 +103,7 @@ class XMLFileNameMixin(object):
     def _get_scan_from_string(self, value, scan=None):
         if self.filetype == 'thermo':
             try:
-                return dict([i.split('=') for i in value.split(' ')]).get('scan', 'No Title')
+                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scan', 'No Title')
             except:
                 pass
         if self.filetype == 'wiff':
@@ -113,6 +114,11 @@ class XMLFileNameMixin(object):
                 right = value[left:].find(' ')
                 right = -1 if right == -1 else right+left
                 return value[left:right] if right != -1 else value[left:]
+        if self.filetype == 'masshunter':
+            try:
+                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scanId', 'No Title')
+            except:
+                pass
         return value
 
 class GuessIterator(templates.GenericIterator):
@@ -148,7 +154,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
          I just need a parser right now so the specs might not be exactly correct
 
         The returned items are ScanObjects
-        
+
         """
         super(MZMLIterator, self).__init__(filename)
         self.scans = {}
@@ -156,16 +162,78 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         self.full = full
         self.ms_filter = ms_filter
         self.start = start
-        spectra_tags = ('{http://psi.hupo.org/ms/mzml}spectrum', '{http://psi.hupo.org/ms/mzml}indexedmzML', '{http://psi.hupo.org/ms/mzml}chromatogram')
         self.filename.seek(0)
-        self.spectra = etree.parse(self.filename).iter(tag=spectra_tags) if self.gzip else etree.iterparse(self.filename, tag=spectra_tags, recover=True)
-        self.scans = {}
+        self.spectra = cetree.parse(self.filename).iter() if self.gzip else cetree.iterparse(self.filename)
         self.ra = {}
+        duplicate_values = set([])
+        invalid_index = False
+        for event, element in self.spectra:
+            if element.tag.endswith('offset'):
+                self.ra[self._get_scan_from_string(element.get('idRef'))] = element.text
+                if element.text in duplicate_values:
+                    invalid_index = True
+                    break
+                duplicate_values.add(element.text)
+            element.clear()
+        if not self.ra or invalid_index:
+            if invalid_index:
+                print('mzML index contains duplicate values. Please rebuild index. Building a new index in memory.')
+            else:
+                print('mzML index is missing. Please provide files with an index. Building index in memory.')
+            self.ra = self.build_index(self.filename)
+        del self.spectra
+        self.filename.seek(0)
+        self.spectra = cetree.parse(self.filename).iter() if self.gzip else cetree.iterparse(self.filename)
+        self.scans = {}
         self.startIter = True
         self.db = None
-            
+
     def __iter__(self):
         return self
+
+    def find_tags(self, text, tag):
+        open = '<'+tag+' '
+        pos = text.find(open)
+        start_pos, end_pos = -1, -1
+        if pos != -1:
+            start_pos = pos
+            end = '</'+tag+'>'
+            pos = text.find(end)
+            if pos != -1:
+                end_pos = pos+len(end)
+        return (start_pos, end_pos, tag)
+
+    def build_index(self, file_obj):
+        file_obj.seek(0)
+        new_index = {}
+        character_count = 0
+        UNCONSUMED = ''
+        while True:
+            i = UNCONSUMED+file_obj.read(2**16)
+            UNCONSUMED  = ''
+            if i == '':
+                break
+            while i:
+                start, end, tag = self.find_tags(i, 'spectrum')
+                if start == -1:
+                    start, end, tag = self.find_tags(i, 'chromatogram')
+                if start == -1:
+                    character_count += len(i)
+                    i = ''
+                    continue
+                start_tag_end = i[start:].find('>\n')
+                if start_tag_end == -1:
+                    UNCONSUMED = i
+                    i = ''
+                    character_count += len(i)
+                    continue
+                tag_header = i[start:start+start_tag_end]+'></'+tag+'>'
+                scanId = self._get_scan_from_string(cetree.fromstring(tag_header).get('id'))
+                new_index[scanId] = character_count+start
+                character_count += start+1
+                i = i[start+1:]
+        file_obj.seek(0)
+        return new_index
 
     def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
         if 'zlib compression' in params:
@@ -174,18 +242,14 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         else:
             array = base64.b64decode(array)
         if '64-bit float' in params:
-            array = struct.unpack('{}d'.format(len(array)/8), array)
+            array = struct.unpack('{}d'.format(int(len(array)/8)), array)
         else:
-            array = struct.unpack('{}f'.format(len(array)/4), array)
+            array = struct.unpack('{}f'.format(int(len(array)/4)), array)
         return array
 
     def parselxml(self, spectra, full=False, namespace='{http://psi.hupo.org/ms/mzml}'):
         try:
-            if spectra.tag == '{0}indexedmzML'.format(namespace):
-                # read our index in
-                self.ra.update(dict([(self._get_scan_from_string(i.values()[0]), i.text) for i in spectra.findall('{0}indexList/{0}index/'.format(namespace))]))
-                return None
-            elif spectra.tag == '{0}spectrum'.format(namespace):
+            if spectra.tag == '{0}spectrum'.format(namespace):
                 scanObj = ScanObject()
                 # spectra_info = dict(zip(spectra.keys(),spectra.values()))
                 spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
@@ -216,9 +280,9 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
                     intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
                     scanObj.scans = list(zip(mzmls, intensities))
-                spectra.clear()
-                if title not in self.ra:
-                    self.ra.update({title: self.previous_offset})
+                if self.filetype == 'thermo':
+                    target_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursorList/{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
+                    scanObj.product_ion = target_info.get('isolation window target m/z', 0)
                 return scanObj
             elif spectra.tag == '{0}chromatogram'.format(namespace):
                 if spectra.get('id') == 'TIC':
@@ -233,7 +297,6 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     chromObj.times = time_array
                     chromObj.intensities = intensities
                     self.chromatogram = chromObj
-                    spectra.clear()
                     return None
                 else:
                     scanObj = ScanObject()
@@ -268,9 +331,6 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                         intensity_params = dict([(i.get('name'), i.get('value')) for i in intensities.findall('{0}cvParam'.format(namespace))])
                         intensities = self.unpack_array(intensities.find('{0}binary'.format(namespace)).text, intensity_params, namespace=namespace)
                         scanObj.scans = list(zip(mzmls, intensities))
-                    spectra.clear()
-                    if title not in self.ra:
-                        self.ra.update({title: self.previous_offset})
                     return scanObj
         except:
             import traceback
@@ -280,9 +340,12 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         #     raise StopIteration
 
     def next(self):
-        self.previous_offset = self.filename.tell()
         if self.spectra:
             spectra = next(self.spectra)
+            tag = spectra[1].tag
+            while not (tag.endswith('spectrum') or tag.endswith('chromatogram')):
+                spectra = next(self.spectra)
+                tag = spectra[1].tag
         else:
             raise StopIteration
         if self.gzip:
@@ -291,6 +354,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 self.scans[scan.id] = scan
         else:
             scan = self.parselxml(spectra[1], full=self.full)
+        spectra[1].clear()
         return scan
 
     def getChromatogram(self):
@@ -325,10 +389,10 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 while entry and closing_tag not in entry:
                     entry = self.filename.readline()
                     row.append(entry)
-                spectra = etree.fromstring(''.join(row))
+                spectra = cetree.fromstring(''.join(row))
             return self.parselxml(spectra, full=True, namespace='')
-        except IndexError:
-            sys.stderr.write('mzml cannot find %s\n'%id)
+        except:
+            sys.stderr.write('Unable to parse scan {}:\n{}\n'.format(id, traceback.format_exc()))
             return None
 
 class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.GenericIterator):
@@ -1239,6 +1303,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         labels = {}
         from six.moves import html_parser as HTMLParser
         html_parser = HTMLParser.HTMLParser()
+        silac = None
         if self.version == 1:
             sql = 'select ParameterValue from processingnodeparameters where ParameterName == "QuantificationMethod"'
             self.cur.execute(sql)
@@ -1250,6 +1315,8 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                     silac = etree.fromstring(str(xml).encode('utf-16'))
         elif self.version == 2:
             silac = etree.fromstring([i for i in self.root.iterdescendants('QuantitationMethod')][0].text.encode('utf-16'))
+        if silac is None:
+            return labels
         for method in silac.findall('*MethodPart'):
             if self.version == 1 and method.getparent().get('name') != 'QuanChannels':
                 continue
