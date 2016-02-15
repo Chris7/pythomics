@@ -62,6 +62,21 @@ lastSplit = re.compile(r'.+[/\\](.+)')
 #         return wrapper(view)
 #     return wrapper
 
+def indent_xml(elem, level=0):
+    i = "\n" + level*"  "
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = i + "  "
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+        for elem in elem:
+            indent_xml(elem, level+1)
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+    else:
+        if level and (not elem.tail or not elem.tail.strip()):
+            elem.tail = i
+
 class GenericProteomicIterator(object):
     """
     Generics to be overridden
@@ -157,6 +172,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
 
         """
         super(MZMLIterator, self).__init__(filename)
+        cetree.register_namespace('', 'http://psi.hupo.org/ms/mzml')
         self.scans = {}
         self.store = store
         self.full = full
@@ -336,8 +352,8 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
             import traceback
             sys.stderr.write('Error unpacking spectra {}:\n {}'.format(spectra, traceback.format_exc()))
             return None
-        # elif spect:
-        #     raise StopIteration
+            # elif spect:
+            #     raise StopIteration
 
     def next(self):
         if self.spectra:
@@ -360,7 +376,86 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
     def getChromatogram(self):
         return self.chromatogram
 
-    def getScan(self, id, peptide=None):
+    def writeScans(self, handle=None, scans=None, namespace='{http://psi.hupo.org/ms/mzml}'):
+        # This function takes the existing mzML, strips all scans, and then replaces them with the desired scans
+        if scans is None:
+            return
+        if not isinstance(scans, (list, tuple)):
+            scans = [scans]
+
+        initial_pos = self.filename.tell()
+        self.filename.seek(0)
+        xml_iter = etree.parse(self.filename, events=('start',)).iter() if self.gzip else etree.iterparse(self.filename, events=('start',))
+
+        # this is the indexedmzML header
+        xml_info = xml_iter.next()
+        root = xml_info[1]
+        if handle is None:
+            handle = sys.stdout
+        elif isinstance(handle, six.string_types):
+            handle = open(handle, 'w')
+
+        # go until we get to the spectrumlist because it contains scans
+        spectrumList = root.find('{0}mzML/{0}run/{0}spectrumList'.format(namespace))
+        if spectrumList is None:
+            while xml_info[1].tag != '{}spectrumList'.format(namespace):
+                xml_info = xml_iter.next()
+            spectrumList = xml_info[1]
+        spectrumList.set('count', str(len(scans)))
+        indexList = None
+        indexOffset = None
+        fileChecksum = None
+        for xml_info in xml_iter:
+            if xml_info[1].tag == '{}indexList'.format(namespace):
+                indexList = xml_info[1]
+            elif xml_info[1].tag == '{}indexListOffset'.format(namespace):
+                indexOffset = xml_info[1]
+            elif xml_info[1].tag == '{}fileChecksum'.format(namespace):
+                fileChecksum = xml_info[1]
+        spectrumList.clear()
+        spectrumList.tail = '\n'
+        if indexList is None:
+            indexList = etree.SubElement(root, 'indexList', {'count': '2'})
+        else:
+            indexList.clear()
+        indexList.tail = '\n'
+        indent_xml(root)
+        contents = etree.tostring(root, pretty_print=True)
+        scan_offset = contents.find('<spectrumList')+14
+        del contents
+        scan_indices = []
+
+        # add our scans to the xml object
+        offset = self.filename.tell()
+        for scan_index, scan_id in enumerate(scans):
+            scan = self.getScan(str(scan_id), xml=True)
+            scan_indices.append({'offset': str(scan_offset), 'idRef': scan.get('id')})
+            scan.set('index', str(scan_id))
+            scan_offset += len(cetree.tostring(scan))
+            scan.tail = '\n'
+            spectrumList.append(scan)
+
+        self.filename.seek(offset)
+        spectrumIndex = etree.SubElement(indexList, 'index', {'name': 'spectrum'})
+        spectrumIndex.tail = '\n'
+        for scan_index, scan_offset_info in enumerate(scan_indices):
+            offset = etree.SubElement(spectrumIndex, 'offset', {'idRef': scan_offset_info['idRef']})
+            offset.text = scan_offset_info['offset']
+        indent_xml(root)
+        contents = etree.tostring(root, pretty_print=True)
+        if indexOffset is not None:
+            index_offset = contents.find('<indexListOffset')
+            indexOffset.text = str(index_offset)
+        if fileChecksum is not None:
+            import hashlib
+            m = hashlib.sha1()
+            m.update(contents[:contents.find('<fileChecksum')].encode())
+            fileChecksum.text = m.hexdigest()
+        handle.write(contents)
+        self.filename.seek(initial_pos)
+
+
+    def getScan(self, id, peptide=None, xml=False):
         try:
             if self.gzip:
                 #read the whole damn thing in...
@@ -389,6 +484,9 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 while entry and closing_tag not in entry:
                     entry = self.filename.readline()
                     row.append(entry)
+                if xml:
+                    spectra = etree.fromstring(''.join(row))
+                    return spectra
                 spectra = cetree.fromstring(''.join(row))
             return self.parselxml(spectra, full=True, namespace='')
         except:
