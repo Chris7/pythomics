@@ -401,7 +401,6 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
             while xml_info[1].tag != '{}spectrumList'.format(namespace):
                 xml_info = xml_iter.next()
             spectrumList = xml_info[1]
-        spectrumList.set('count', str(len(scans)))
         indexList = None
         indexOffset = None
         fileChecksum = None
@@ -412,12 +411,18 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 indexOffset = xml_info[1]
             elif xml_info[1].tag == '{}fileChecksum'.format(namespace):
                 fileChecksum = xml_info[1]
+        attribs = copy.deepcopy(spectrumList.attrib)
         spectrumList.clear()
+        attribs['count'] = str(len(scans))
+        for key, value in attribs.items():
+            spectrumList.set(key, value)
         spectrumList.tail = '\n'
         if indexList is None:
-            indexList = etree.SubElement(root, 'indexList', {'count': '2'})
+            indexList = etree.SubElement(root, 'indexList', {'count': '1'})
         else:
             indexList.clear()
+            indexList.set('count', '1')
+
         indexList.tail = '\n'
         indent_xml(root)
         contents = etree.tostring(root, pretty_print=True)
