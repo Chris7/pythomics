@@ -380,7 +380,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         # This function takes the existing mzML, strips all scans, and then replaces them with the desired scans
         if scans is None:
             return
-        if not isinstance(scans, (list, tuple)):
+        if not hasattr(scans, '__iter__'):
             scans = [scans]
 
         initial_pos = self.filename.tell()
