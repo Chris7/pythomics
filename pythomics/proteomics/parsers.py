@@ -1381,6 +1381,11 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.cur.execute(sql)
         for i in self.cur.fetchall():
             self.tmods[i[0]] = i[1:]
+        self.protein_map = {}
+        sql = 'select pa.ProteinID, pa.Description from proteinannotations pa'
+        self.cur.execute(sql)
+        for i in self.cur.fetchall():
+            self.protein_map[i[0]] = i[1]
         if peptide is not None and not isinstance(peptide, (tuple, set, list)):
             peptide = [peptide]
         self.extra = 'and p.Sequence IN ({})'.format(','.join(['"{}"'.format(i) for i in peptide])) if peptide is not None else ''
@@ -1399,6 +1404,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             #sql = 'select sp.spectrum,p.ConfidenceLevel,p.ConfidenceLevel,p.Sequence,p.PeptideID,pp.ProteinID,p.SpectrumID from spectra sp left join peptides p on (p.SpectrumID=sp.UniqueSpectrumID) left join peptidesproteins pp on (p.PeptideID=pp.PeptideID) where p.PeptideID IS NOT NULL'
             sql = 'select GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.ConfidenceLevel),GROUP_CONCAT(p.Sequence),GROUP_CONCAT(p.PeptideID), GROUP_CONCAT(pp.ProteinID), p.SpectrumID, sh.Charge, sh.RetentionTime, sh.FirstScan, sh.LastScan, mp.FileID from peptides p join peptidesproteins pp on (p.PeptideID=pp.PeptideID) left join spectrumheaders sh on (sh.SpectrumID=p.SpectrumID) left join masspeaks mp on (sh.MassPeakID=mp.MassPeakID) where p.PeptideID IS NOT NULL and p.ConfidenceLevel >= {} {} GROUP BY p.SpectrumID'.format(clvl, self.extra)
             self.cur.execute(sql)
+        self.base_sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID, pp.ProteinID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) left join peptidesproteins pp on (p.PeptideID=pp.PeptideID) "
         self.index = 0
         self.master_scans = {}
 
@@ -1473,7 +1479,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         """
         get a random scan
         """
-        sql = "select sp.Spectrum, p.Sequence, p.PeptideID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) where sh.SpectrumID = %d and p.Sequence = '%s'"%(int(specId),peptide)
+        sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) where sh.SpectrumID = %d and p.Sequence = '%s'"%(int(specId),peptide)
         self.cur.execute(sql)
         i = self.cur.fetchone()
         if not i:
@@ -1487,14 +1493,14 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         get a random scan
         """
         if fdr:
-            sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) WHERE p.ConfidenceLevel >= {} and p.SearchEngineRank <= {} {}".format(self.clvl, self.srank, self.extra)
+            sql = self.base_sql+"WHERE p.ConfidenceLevel >= {} and p.SearchEngineRank <= {} {}".format(self.clvl, self.srank, self.extra)
             try:
                 self.cur.execute(sql)
             except sqlite3.OperationalError:
-                sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) WHERE p.ConfidenceLevel >= {} {}".format(self.clvl, self.extra)
+                sql = self.base_sql+"WHERE p.ConfidenceLevel >= {} {}".format(self.clvl, self.extra)
                 self.cur.execute(sql)
         else:
-            sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID)"
+            sql = self.base_sql
             self.cur.execute(sql)
         while True:
             # results = self.cur.fetchmany(1000)
@@ -1611,7 +1617,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             scanObj.peptide = sequence
             scanObj.rank = searchRank
             scanObj.confidence = confidence
-            scanObj.acc = i[4]
+            scanObj.acc = ';'.join(self.protein_map.get(j, j) for j in i[4].split(','))
             scanObj.charge = i[6]
             scanObj.rt = i[7]
             fName = self.sFileMap[i[10]]
@@ -1632,6 +1638,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         scanObj = PeptideObject()
         peptide = str(i[1])
         pid=i[2]
+        scanObj.acc = self.protein_map.get(i[4], i[4])
         if pid is None:
             return None
         if modifications:
@@ -1684,7 +1691,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         return self.index*100/self.nrows
 
     def getPeptide(self, peptide=None):
-        sql = "select sp.Spectrum, p.Sequence, p.PeptideID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) where p.Sequence = '%s'"%(peptide)
+        sql = self.base_sql+"where p.Sequence = '%s'"%(peptide)
         self.cur.execute(sql)
         for i in self.cur.fetchall():
             yield self.parseFullScan(i)

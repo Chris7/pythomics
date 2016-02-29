@@ -79,6 +79,7 @@ class PeptideObject(ScanObject):
         self.mods = set([])
         self.peptide = ""
         self.hit = 0
+        self.acc = ''# accession information
 
     def addModification(self, aa,position, modMass, modType):
         """
