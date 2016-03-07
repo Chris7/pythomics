@@ -1437,8 +1437,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         masses[float(mod_info.get('DeltaMass'))].add(aa)
                     except KeyError:
                         masses[float(mod_info.get('DeltaMass'))] = set([aa])
-            if masses:
-                labels[method_label] = masses
+            labels[method_label] = masses
         return labels
 
     def loadChromatogram(self):
