@@ -118,7 +118,7 @@ class XMLFileNameMixin(object):
     def _get_scan_from_string(self, value, scan=None):
         if self.filetype == 'thermo':
             try:
-                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scan', 'No Title')
+                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scan', value)
             except:
                 pass
         if self.filetype == 'wiff':
@@ -319,14 +319,15 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
                     scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
                     precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
-                    if self.filetype == 'wiff':
-                        charge = 1
-                        ms_level = int(spectra_params.get('ms level', 2))
-                        product_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}product/{0}isolationWindow/{0}cvParam'.format(namespace))])
-                        scanObj.product_ion = product_info.get('isolation window target m/z', 0)
-                    else:
-                        ms_level = int(spectra_params.get('ms level', 0))
-                        charge = precursor_info.get('charge state', 0)
+                    charge = 1
+                    ms_level = int(spectra_params.get('ms level', 2))
+                    product_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}product/{0}isolationWindow/{0}cvParam'.format(namespace))])
+                    scanObj.product_ion = float(product_info.get('isolation window target m/z', 0))
+                    # if self.filetype == 'wiff':
+                    #     pass
+                    # else:
+                    #     ms_level = int(spectra_params.get('ms level', 0))
+                    #     charge = precursor_info.get('charge state', 0)
                     precursor_ion = precursor_info.get('isolation window target m/z', 0)
                     rt = scan_info.get('scan start time', 0)
                     scanObj.ms_level = ms_level
@@ -340,7 +341,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                         title = int(title)
                     except:
                         pass
-                    if title >= self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
+                    if (not self.ms_filter or ms_level==self.ms_filter) and full:
                         mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
                         mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
                         mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
@@ -479,14 +480,17 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                         return spectra
                 self.filename.seek(int(self.ra[str(id)]))
                 entry = self.filename.readline()
-                opening_tag = '<spectrum '
-                closing_tag = '</spectrum>'
-                while entry and opening_tag not in entry:
+                tags = ['spectrum', 'chromatogram']
+                tags_present = ['<{}'.format(i) in entry for i in tags]
+                while entry and not any(tags_present):
                     entry = self.filename.readline()
+                    tags_present = ['<{}'.format(i) in entry for i in tags]
                 if not entry:
                     return None
+                closing_tag = [tags[i] for i,v in enumerate(tags_present) if v][0]
                 row = [entry]
-                while entry and closing_tag not in entry:
+                entry = self.filename.readline()
+                while entry and '</{}>'.format(closing_tag) not in entry:
                     entry = self.filename.readline()
                     row.append(entry)
                 if xml:
