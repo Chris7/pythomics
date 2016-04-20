@@ -118,7 +118,7 @@ class XMLFileNameMixin(object):
     def _get_scan_from_string(self, value, scan=None):
         if self.filetype == 'thermo':
             try:
-                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scan', 'No Title')
+                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scan', value)
             except:
                 pass
         if self.filetype == 'wiff':
@@ -131,7 +131,7 @@ class XMLFileNameMixin(object):
                 return value[left:right] if right != -1 else value[left:]
         if self.filetype == 'masshunter':
             try:
-                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scanId', 'No Title')
+                return dict([i.split('=', 1) for i in value.split(' ') if '=' in i]).get('scanId', value)
             except:
                 pass
         return value
@@ -340,7 +340,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                         title = int(title)
                     except:
                         pass
-                    if title >= self.start and (not self.ms_filter or ms_level==self.ms_filter) and full:
+                    if (not self.ms_filter or ms_level==self.ms_filter) and full:
                         mzmls, intensities = spectra.findall('{0}binaryDataArrayList/'.format(namespace))
                         mzml_params = dict([(i.get('name'), i.get('value')) for i in mzmls.findall('{0}cvParam'.format(namespace))])
                         mzmls = self.unpack_array(mzmls.find('{0}binary'.format(namespace)).text, mzml_params, namespace=namespace)
@@ -479,13 +479,17 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                         return spectra
                 self.filename.seek(int(self.ra[str(id)]))
                 entry = self.filename.readline()
-                opening_tag = '<spectrum '
-                closing_tag = '</spectrum>'
-                while entry and opening_tag not in entry:
+                opening_tags = ['<spectrum ', '<chromatogram ']
+                while entry:
+                    matching_tags = list(filter(lambda x: x[0] != -1, ((entry.find(i), i) for i in opening_tags)))
+                    if any(matching_tags):
+                        opening_tag = sorted(matching_tags, key=operator.itemgetter(0))[0][1][1:].strip()
+                        break
                     entry = self.filename.readline()
                 if not entry:
                     return None
                 row = [entry]
+                closing_tag = '</{}>'.format(opening_tag)
                 while entry and closing_tag not in entry:
                     entry = self.filename.readline()
                     row.append(entry)
