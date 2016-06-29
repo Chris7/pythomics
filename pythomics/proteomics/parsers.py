@@ -319,14 +319,15 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     spectra_params = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}cvParam'.format(namespace))])
                     scan_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}scanList/{0}scan/{0}cvParam'.format(namespace))])
                     precursor_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}precursor/{0}isolationWindow/{0}cvParam'.format(namespace))])
-                    if self.filetype == 'wiff':
-                        charge = 1
-                        ms_level = int(spectra_params.get('ms level', 2))
-                        product_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}product/{0}isolationWindow/{0}cvParam'.format(namespace))])
-                        scanObj.product_ion = product_info.get('isolation window target m/z', 0)
-                    else:
-                        ms_level = int(spectra_params.get('ms level', 0))
-                        charge = precursor_info.get('charge state', 0)
+                    charge = 1
+                    ms_level = int(spectra_params.get('ms level', 2))
+                    product_info = dict([(i.get('name'), i.get('value')) for i in spectra.findall('{0}product/{0}isolationWindow/{0}cvParam'.format(namespace))])
+                    scanObj.product_ion = float(product_info.get('isolation window target m/z', 0))
+                    # if self.filetype == 'wiff':
+                    #     pass
+                    # else:
+                    #     ms_level = int(spectra_params.get('ms level', 0))
+                    #     charge = precursor_info.get('charge state', 0)
                     precursor_ion = precursor_info.get('isolation window target m/z', 0)
                     rt = scan_info.get('scan start time', 0)
                     scanObj.ms_level = ms_level
@@ -1441,8 +1442,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         masses[float(mod_info.get('DeltaMass'))].add(aa)
                     except KeyError:
                         masses[float(mod_info.get('DeltaMass'))] = set([aa])
-            if masses:
-                labels[method_label] = masses
+            labels[method_label] = masses
         return labels
 
     def loadChromatogram(self):
