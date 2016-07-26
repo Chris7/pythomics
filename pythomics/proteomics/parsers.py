@@ -814,7 +814,7 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
         rt = element.attrib.get("rt", 'NA')
         scanObj = PeptideObject()
         scanObj.charge = charge
-        # X!Tandem gives M+H, so we reverese this to get the precursor as it appears on the scan
+        # X!Tandem gives M+H, so we reverse this to get the precursor as it appears on the scan
         scanObj.mass = (premass+(charge-1)*config.PROTON)/charge
         if rt:
             rt_match = self.rt_parse.match(rt)

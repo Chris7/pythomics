@@ -41,7 +41,8 @@ class Peptide(object):
         if average:
             pass
         else:
-            return sum([config.RESIDUE_MASSES[i][0] for i in self.sequence.upper()])
+            return sum([config.RESIDUE_MASSES[i][0] for i in self.sequence.upper()])+config.MODIFICATION_MASSES['h2o'][0]
+
 
     def getMSMass(self, charge=0):
-        return (self.getMass()+(charge-1)*config.PROTON)/float(charge)
+        return (self.getMass()+charge*config.PROTON)/float(charge)
