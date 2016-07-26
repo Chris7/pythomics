@@ -562,7 +562,7 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
             pepObj.charge = charge
             mass = float(pep_info.get('precursor_neutral_mass', 0))
             # this is the precursor neutral mass, we need m/z
-            pepObj.mass = (mass+(charge*config.HYDROGEN))/charge
+            pepObj.mass = (mass+(charge*config.PROTON))/charge
             rt = float(pep_info.get('retention_time_sec', 0))
             rt = float(rt/60)+int(rt%60)/100.0
             pepObj.rt = rt
@@ -815,7 +815,7 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
         scanObj = PeptideObject()
         scanObj.charge = charge
         # X!Tandem gives M+H, so we reverese this to get the precursor as it appears on the scan
-        scanObj.mass = (premass+(charge-1)*config.HYDROGEN)/charge
+        scanObj.mass = (premass+(charge-1)*config.PROTON)/charge
         if rt:
             rt_match = self.rt_parse.match(rt)
             if rt_match:
@@ -1562,6 +1562,8 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         finfo = row.split('"')
                         charge = finfo[3]
                         smass = finfo[17]
+                        if not float(smass):
+                            smass = (float(finfo[5])+(int(charge)-1)*config.PROTON)/float(charge)
                         scanObj.charge = charge
                         scanObj.mass = float(smass)
                         stage=2

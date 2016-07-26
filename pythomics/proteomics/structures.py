@@ -132,5 +132,5 @@ class PeptideObject(ScanObject):
         aa_info = [config.RESIDUE_MASSES[i.upper()] for i in self.peptide if i in config.RESIDUE_MASSES]
         peptide_mass = sum([i[0] for i in aa_info])+config.MODIFICATION_MASSES['h'][0]+config.MODIFICATION_MASSES['oh'][0]
         modifications = sum([float(i[2]) for i in self.mods])
-        mass = peptide_mass+modifications+float(self.charge)*config.HYDROGEN
+        mass = peptide_mass+modifications+float(self.charge)*config.PROTON
         return mass/float(self.charge)

@@ -1,4 +1,5 @@
 HYDROGEN = 1.007825
+PROTON = 1.00727
 #NEUTRON = 1.008701
 # we use the mass of a neutron of c13
 NEUTRON = 1.003355
