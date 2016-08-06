@@ -91,7 +91,7 @@ def mapper(peptides):
     # matches = [{'peptide': i.group(2), 'peptide_start': i.start(2), 'accession': i.group(1)}
     #            for j in peptides
     #            for i in re.finditer(pep_format.format(j.upper().replace('L', '!').replace('!', '[IL]')), protein_sequences, re.M)]
-    sequences = protein_sequences.replace('I', 'L')
+    sequences = protein_sequences.replace('L', 'I')
     matches = []
     for j in peptides:
         pep_match = j.upper().replace('L','I')
