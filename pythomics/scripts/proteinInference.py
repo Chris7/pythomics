@@ -91,18 +91,18 @@ def mapper(peptides):
     # matches = [{'peptide': i.group(2), 'peptide_start': i.start(2), 'accession': i.group(1)}
     #            for j in peptides
     #            for i in re.finditer(pep_format.format(j.upper().replace('L', '!').replace('!', '[IL]')), protein_sequences, re.M)]
-    sequences = protein_sequences.replace('I', 'L')
+    sequences = protein_sequences.replace('L', 'I')
     matches = []
+
     for j in peptides:
-        pep_match = j.upper().replace('L','I')
+        pep_match = j.upper().replace('L', 'I')
         pos_start = 0
         pos = sequences.find(pep_match)
-        peptide_offset = pos
         while pos != -1:
+            peptide_offset = pos_start+pos
             accession_end = sequences[:peptide_offset].rfind('\t')
             accession_start = sequences[:accession_end].rfind('\n')+1
             accession = protein_sequences[accession_start:accession_end]
-            peptide_offset = pos_start+pos
             d = {'peptide': j, 'peptide_start': peptide_offset, 'accession': accession}
             matches.append(d)
             pos_start += pos+1
