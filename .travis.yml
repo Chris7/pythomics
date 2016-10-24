@@ -1,29 +1,43 @@
 before_install:
-  - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
-  - chmod +x miniconda.sh
-  - ./miniconda.sh -b
-  - export PATH=/home/travis/miniconda/bin:$PATH
-  - conda update --yes conda
+  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
+      wget https://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh;
+    else
+      wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
+    fi
+  - bash miniconda.sh -b -p $HOME/miniconda
+  - export PATH="$HOME/miniconda/bin:$PATH"
+  - hash -r
+  - conda config --set always_yes yes --set changeps1 no
+  - conda update -q conda
+  - conda info -a
   # The next couple lines fix a crash with multiprocessing on Travis and are not specific to using Miniconda
   - sudo rm -rf /dev/shm
   - sudo ln -s /run/shm /dev/shm
 install:
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib nose dateutil pandas statsmodels lxml
+  - cd $TRAVIS_BUILD_DIR
+  - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib nose dateutil pandas statsmodels lxml
+  - source activate test-environment
   # Coverage packages are on my binstar channel
-  - conda install --yes -c dan_blanchard python-coveralls nose-cov
-  - sudo pip install -q coveralls coverage pysam
-  - sudo pip install -q -r requirements.txt
-  - sudo pip install -q -e .
-script:
-  #- make test
-  - nosetests -vv --exclude=test_script.*.py --with-coverage --cover-tests --cover-package=pythomics
-  - coverage report -m
+  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
+      conda install --yes -c dan_blanchard python-coveralls nose-cov;
+    else
+      echo "no coveralls for python3";
+    fi
+  - pip install --upgrade pip
+  - pip install -r requirements.txt
+  - pip install -e .
 language:
   - python
 python:
   - "2.7"
-  - "3.3"
   - "3.4"
+  - "3.5"
 after_success:
-  coveralls
-
+  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
+      coveralls;
+    else
+      echo "no coveralls for python3";
+    fi
+script:
+  #- make test
+  - nosetests -vv --exclude=test_script.*.py --with-coverage --cover-tests --cover-package=pythomics
