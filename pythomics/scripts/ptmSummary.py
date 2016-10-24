@@ -88,7 +88,7 @@ def main():
                 matches = all_data[all_data[pep_col] == peptide]
                 df_col_index = (gene, protein, site)
                 for quant_col in file_quant_cols:
-                    med = ((np.log2(matches[quant_col]) if med_norm else matches[quant_col])-wp_median).median()
+                    med = ((np.log2(matches[quant_col]) if log_norm else matches[quant_col])-wp_median).median()
                     for col_name in col_names[quant_col]:
                         df_index = (gene, protein, site, peptide)
                         if df_index in df and col_name in df[df_index]:
