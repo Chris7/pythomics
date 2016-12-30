@@ -109,7 +109,7 @@ class XMLFileNameMixin(object):
             filetag = filenode[1]
             file_params = dict([(i.get('name'), i.get('value')) for i in filetag.findall('{0}cvParam'.format('{http://psi.hupo.org/ms/mzml}'))])
             for identifier, filetype in identifiers:
-                if filter(lambda x: identifier in x.lower(), file_params.keys()):
+                if any(filter(lambda x: identifier in x.lower(), file_params.keys())):
                     self.filetype = filetype
                     break
             filetag.clear()
