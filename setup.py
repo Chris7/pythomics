@@ -1,11 +1,11 @@
 from setuptools import setup
 
 setup(name='pythomics',
-      version='0.3.42',
+      version='0.3.43',
       description='A multi-omic python package',
       url='https://github.com/pandeylab/pythomics',
       author='Chris Mitchell',
-      author_email='cmitch48@jhmi.edu',
+      author_email='chris.mit7@gmail.com',
       install_requires = ['six'],
       license='GPL3',
       packages=['pythomics','pythomics.parsers', 'pythomics.proteomics',
