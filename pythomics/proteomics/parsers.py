@@ -1483,7 +1483,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         """
         get a random scan
         """
-        sql = "select sp.Spectrum, p.Sequence, p.PeptideID, p.SpectrumID from spectrumheaders sh left join spectra sp on (sp.UniqueSpectrumID=sh.UniqueSpectrumID) left join peptides p on (sh.SpectrumID=p.SpectrumID) where sh.SpectrumID = %d and p.Sequence = '%s'"%(int(specId),peptide)
+        sql = self.base_sql + " where sh.SpectrumID = %d and p.Sequence = '%s'"%(int(specId),peptide)
         self.cur.execute(sql)
         i = self.cur.fetchone()
         if not i:
