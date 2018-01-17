@@ -4,5 +4,4 @@ testenv:
 
 test:
 	nosetests --with-coverage --cover-erase --cover-package=pythomics -s tests
-	coverage report
 
