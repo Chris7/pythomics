@@ -1,5 +1,12 @@
-import os, re, sys
-import pythomics.templates as templates, config
+import os
+import re
+import sys
+
+import six
+
+from .. import templates
+from . import config
+
 
 def _reverse_complement(seq):
     return ''.join([config.BASE_PAIR_COMPLEMENTS.get(i, 'N') for i in reversed(seq)])
@@ -9,7 +16,7 @@ def _complement(seq):
 
 def _translate(seq):
     seq = seq.upper()
-    return ''.join([config.CODON_TABLE.get(seq[i:i+3],'') for i in xrange(0,len(seq.upper()),3)])
+    return ''.join([config.CODON_TABLE.get(seq[i:i+3],'') for i in six.moves.range(0,len(seq.upper()),3)])
 
 class FastaIterator(templates.GenericIterator):
     def __init__(self, filename, delimiter='>', **kwrds):
@@ -29,7 +36,7 @@ class FastaIterator(templates.GenericIterator):
         if not self.fasta_index:
             if os.path.exists('%s.%s' % (self.fasta_file.name, 'fai')):
                 self.fasta_index = '%s.%s' % (self.fasta_file.name, 'fai')
-            elif os.path.exists( '%s.%s' % (self.fasta_file.name, 'faidx')):
+            elif os.path.exists('%s.%s' % (self.fasta_file.name, 'faidx')):
                 self.fasta_index = '%s.%s' % (self.fasta_file.name, 'faidx')
             if self.fasta_index:
                 self.open_fasta_index()
@@ -38,25 +45,22 @@ class FastaIterator(templates.GenericIterator):
         self.sequence_index = {}
         self.row = None
         
-    def __iter__(self):
-        return self
-    
-    def next(self):
+    def _next(self):
         seq = ""
         row = self.row
         # remove new lines and read in our header
         while not row:
-            row = self.fasta_file.next()
+            row = six.next(self.fasta_file)
         if self.parse:
             header = self.parse.match(row)
         else:
             header = row.strip()[self.delimiter_length:]
         #get our sequence
-        row = self.fasta_file.next()
+        row = six.next(self.fasta_file)
         while row and row[0:self.delimiter_length] != self.delimiter:
             seq += row.strip()
             try:
-                row = self.fasta_file.next()
+                row = six.next(self.fasta_file)
             except StopIteration:
                 return header, seq
         self.row = row
@@ -79,7 +83,7 @@ class FastaIterator(templates.GenericIterator):
         self.sequence_index = {}
         _seq_dict = self.sequence_index
         for row in handle:
-            entry = row.strip().split('\t')
+            entry = row.decode('utf-8').strip().split('\t')
             #stored as: {header: length, # of chars to end of this header, length of fasta lines, length of each line including breakchar}
             _seq_dict[entry[0]] = (entry[1], entry[2], entry[3], entry[4])
             
@@ -110,7 +114,7 @@ class FastaIterator(templates.GenericIterator):
         #find how many newlines we have
         seekpos += start+start/divisor
         slen = end-start
-        endpos = slen+slen/divisor+1 #a hack of sorts but it works and is easy
+        endpos = int(slen + (slen/divisor) + 1) #a hack of sorts but it works and is easy
         self.fasta_file.seek(seekpos, 0)
         output = self.fasta_file.read(endpos)
         output = output.replace('\n', '')
@@ -160,4 +164,4 @@ class FastaIterator(templates.GenericIterator):
             self.sequence_index[stripped_header] = (sequence_read, header_end[stripped_header], without_break[stripped_header], with_break[stripped_header])
             for header in header_order:
                 d = self.sequence_index[header]
-                o.write('%s\t%d\t%d\t%d\t%d\n'%(header,d[0],d[1],d[2],d[3]))
+                o.write('{}\t{}\t{}\t{}\t{}\n'.format(header, d[0], d[1], d[2], d[3]).encode('utf-8'))

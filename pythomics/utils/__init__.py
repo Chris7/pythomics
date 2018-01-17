@@ -1,3 +1,6 @@
+import six
+
+
 class ColumnFunctions(object):
     strict = False
     METHODS = ['concat', 'mean', 'median', 'var', 'std', 'sum', 'count']
@@ -42,7 +45,7 @@ class ColumnFunctions(object):
             return 'NA'
         elif len(l) == 1:
             if isinstance(l, set):
-                return iter(l).next()
+                return six.next(iter(l))
             else:
                 return l[0]
         l = self.process_list(l, ordered=True)

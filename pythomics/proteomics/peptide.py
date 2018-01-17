@@ -1,4 +1,4 @@
-import pythomics.proteomics.config as config
+from . import config
 
 class Peptide(object):
     def __init__(self, sequence):

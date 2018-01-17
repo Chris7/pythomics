@@ -1,5 +1,10 @@
-import re, collections, itertools
-import config
+import collections
+import re
+
+import six
+
+from . import config
+
 
 class Enzyme(object):
     def __init__(self, enzyme='trypsin', pattern=None):
@@ -25,7 +30,7 @@ class Enzyme(object):
         peptides = []
         for regex in self.patterns:
             digests = [i for i in regex.split(sequence)]
-            digests = [''.join(i) for i in itertools.izip_longest(digests[0::2],digests[1::2],fillvalue='')]
+            digests = [''.join(i) for i in six.moves.zip_longest(digests[0::2],digests[1::2],fillvalue='')]
             if unique:
                 peptides += list(collections.OrderedDict.fromkeys([i for i in digests if len(i) >= min and len(i) <= max]))
             else:

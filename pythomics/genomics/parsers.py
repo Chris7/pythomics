@@ -1,9 +1,14 @@
 __author__ = 'Chris Mitchell'
 
-import sys, copy
-import pythomics.templates as templates
-import pythomics.genomics.structures as structure
-import pythomics.genomics.config as config
+import copy
+import sys
+
+import six
+
+from . import config
+from . import structures as structure
+from .. import templates
+
 
 class VCFMixin(object):
     vcf_file = None
@@ -28,7 +33,7 @@ class VCFIterator(templates.GenericIterator, VCFMixin):
         """
         super(VCFIterator, self).__init__(filename)
         #process our meta information
-        row = self.filename.next().strip()
+        row = six.next(self.filename).strip()
         self.vcf_file = structure.VCFFile(filename)
         self.inum=0
         while row[:2] == '##':
@@ -44,18 +49,15 @@ class VCFIterator(templates.GenericIterator, VCFMixin):
                 assert(self.vcf_file.add_alt(row))
             elif row.startswith('##'):
                 assert(self.vcf_file.add_extra(row))
-            row = self.filename.next().strip()
+            row = six.next(self.filename).strip()
         #got to the end of meta information, we now have the header
         assert(self.vcf_file.add_header(row))
         self.sample = sample
             
-    def __iter__(self):
-        return self
-
     def get_vcf_entry(self):
-        row = self.filename.next().strip()
+        row = next(self.filename).strip()
         while not row or row.startswith('#'):
-            row = self.filename.next().strip()
+            row = next(self.filename).strip()
         self.inum+=1
         if self.inum%100000 == 0:
             sys.stderr.write('Processed %d VCF entries\n' % self.inum)
@@ -64,7 +66,7 @@ class VCFIterator(templates.GenericIterator, VCFMixin):
             vcf_entry.parse_sample(individual=self.sample)
         return vcf_entry
     
-    def next(self):
+    def _next(self):
         vcf_entry = self.get_vcf_entry()
         if self.sample is not None:
             while vcf_entry and not vcf_entry.has_variant(self.sample):
@@ -79,13 +81,10 @@ class GFFIterator(templates.GenericIterator):
         self.key_delimiter=key_delimiter
         self.quotechar=quotechar
 
-    def __iter__(self):
-        return self
-
-    def next(self):
-        row = self.filename.next()
+    def _next(self):
+        row = six.next(self.filename)
         while not row or row[0] == '#':#skip blanks and comments
-            row = self.filename.next()
+            row = six.next(self.filename)
         ob = structure.GFFObject(info_delimiter=self.info_delimiter,
                                  key_delimiter=self.key_delimiter,
                                  quotechar=self.quotechar)
@@ -94,16 +93,10 @@ class GFFIterator(templates.GenericIterator):
 
 
 class BedIterator(templates.GenericIterator):
-    def __init__(self, filename):
-        super(BedIterator, self).__init__(filename)
-
-    def __iter__(self):
-        return self
-
-    def next(self):
-        row = self.filename.next()
+    def _next(self):
+        row = six.next(self.filename)
         while not row:#skip blanks
-            row = self.filename.next()
+            row = six.next(self.filename)
         ob = structure.BedObject()
         ob.parse(row)
         return ob
