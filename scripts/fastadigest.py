@@ -7,10 +7,14 @@ digesting fasta files, it is possible to create 6 frame as well as
 3 frame translations.
 """
 
-import argparse, sys, itertools
+import sys
+
+import six
+
 from pythomics.templates import CustomParser
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
+
 
 parser = CustomParser(description = description)
 parser.add_fasta()
@@ -20,6 +24,7 @@ parser.add_argument('--genome', help="Are we translating a genome? This will kee
 parser.add_out()
 parser.add_enzyme()
 parser.add_argument('--unique', help="Only return unique peptides per cleavage", action='store_true')
+
 
 def main():
     args = parser.parse_args()
@@ -57,13 +62,13 @@ def main():
             for header, sequence in fasta_file:
                 if genome:
                     slen = len(sequence)
-                for i in xrange(digest_frame):
+                for i in six.moves.range(digest_frame):
                     strand='+'
                     translation = fasta._translate(sequence[i:])
                     if genome:
                         position = i+1
                         translation = [j for j in regex.split(translation)]
-                        translation = [''.join(j) for j in itertools.izip_longest(translation[0::2],translation[1::2],fillvalue='')]
+                        translation = [''.join(j) for j in six.moves.zip_longest(translation[0::2],translation[1::2],fillvalue='')]
                     else:
                         translation = translation.split('*')
                     for protein_index,protein_sequence in enumerate(translation):
@@ -90,7 +95,7 @@ def main():
                         if genome:
                             position = slen-i
                             translation = [j for j in regex.split(translation)]
-                            translation = [''.join(j) for j in itertools.izip_longest(translation[0::2],translation[1::2],fillvalue='')]
+                            translation = [''.join(j) for j in six.moves.zip_longest(translation[0::2],translation[1::2],fillvalue='')]
                         else:
                             translation = translation.split('*')
                         for protein_index,protein_sequence in enumerate(translation):

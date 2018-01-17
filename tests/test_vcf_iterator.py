@@ -6,15 +6,18 @@ import pythomics.genomics.parsers as parser
 class Test_VCF_Iterator(unittest.TestCase):
 
     def setUp(self):
-        self.handle = os.path.join(os.path.split(__file__)[0], 'valid-4.0.vcf')
+        base_dir = os.path.split(__file__)[0]
+        data_dir = os.path.join(base_dir, 'fixtures')
+        self.handle = os.path.join(data_dir, 'valid-4.0.vcf')
 
     def test_vcf_iterator(self):
         out = ""
         f = parser.VCFIterator(self.handle)
         assert(isinstance(f, parser.VCFIterator))
-        out = '\n'.join([str(row) for row in f])
-        digest = hashlib.sha224(out).hexdigest()
-        self.assertEqual( '013ed0dc8b1a1de19d1a2997e95b40b9070c6b1d32f931f568816a0a', digest, "VCF Iterator Failure")
+        entries = [str(row) for row in f]
+        out = '\n'.join(entries)
+        digest = hashlib.sha224(out.encode('utf-8')).hexdigest()
+        self.assertEqual('013ed0dc8b1a1de19d1a2997e95b40b9070c6b1d32f931f568816a0a', digest, "VCF Iterator Failure")
 
     def test_vcf_zygosity(self):
         pass

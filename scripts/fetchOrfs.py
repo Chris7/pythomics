@@ -8,9 +8,14 @@ sequence is divided by stop codons. This is prevent ambiguity with
 differing minimum lengths of ORFs.
 """
 
+import argparse
+import sys
+
+import six
+
 from pythomics.templates import CustomParser
-import sys, argparse
 import pythomics.parsers.fasta as fasta
+
 
 parser = CustomParser(description = description, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_fasta()
@@ -49,7 +54,7 @@ def main():
 
     with args.out as o:
         for header, sequence in fasta_file:
-            for i in xrange(3):
+            for i in six.moves.range(3):
                 strand='+'
                 translation = fasta._translate(sequence[i:])
                 translation = translation.split('*')

@@ -1,15 +1,15 @@
-import gzip
 import argparse
+import gzip
 import sys
-from distutils import spawn
 from collections import deque
+from io import IOBase
 
-from six import string_types
+import six
 
-import pythomics.proteomics.config as protein_config
+from ..proteomics import config as protein_config
 
 
-class GenericIterator(object):
+class GenericIterator(six.Iterator):
     gzip = False
     CHUNK_SIZE = 2**16
     UNCONSUMED = ''
@@ -17,12 +17,12 @@ class GenericIterator(object):
 
     def __init__(self, filename, delimiter='\n', *args, **kwargs):
         self.delimiter = delimiter
-        if isinstance(filename, string_types) and filename.endswith('.gz'):
+        if isinstance(filename, six.string_types) and filename.endswith('.gz'):
             self.gzip = True
             self.filename = gzip.GzipFile(filename)
-        elif isinstance(filename, string_types):
+        elif isinstance(filename, six.string_types):
             self.filename = open(filename)
-        elif isinstance(filename, (file,)):
+        elif (six.PY3 and isinstance(filename, IOBase)) or (six.PY2 and isinstance(filename, file)):
             if filename.name.endswith('.gz'):
                 self.gzip = True
                 self.filename = gzip.GzipFile(filename.name)
@@ -34,7 +34,7 @@ class GenericIterator(object):
     def __iter__(self):
         return self
 
-    def next(self):
+    def _next(self):
         if self.gzip:
             if self.contents:
                 return self.contents.popleft()
@@ -57,10 +57,10 @@ class GenericIterator(object):
             if self.contents:
                 return self.contents.popleft()
         else:
-            return self.filename.next().strip()
+            return six.next(self.filename).strip()
 
     def __next__(self):
-        return self.next()
+        return self._next()
 
 
 class CustomParser(argparse.ArgumentParser):
@@ -70,7 +70,7 @@ class CustomParser(argparse.ArgumentParser):
 
     def add_enzyme(self, help="The enzyme to cleave with."):
         self.add_argument('--enzyme', help=help, nargs='+',
-                          choices=protein_config.ENZYMES.keys(), type=str, default='trypsin')
+                          choices=list(protein_config.ENZYMES.keys()), type=str, default='trypsin')
         self.add_argument('--enzyme-pattern', help='A regex cleavage pattern such as [KR]|{P} to cleave proteins with.', type=str)
         self.add_argument('--min', help="Minimum cleavage length", type=int, default=7)
         self.add_argument('--max', help="Maximum cleavage length", type=int, default=30)

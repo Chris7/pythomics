@@ -8,18 +8,25 @@ corresponding proteins present in an annotation file, and can also
 use this annotation to include iBAQ measures.
 """
 
-import argparse, sys, csv, copy, decimal, itertools, os, operator
+import argparse
+import csv
+import decimal
+import itertools
+import os
+import operator
 try:
     import re2 as re
 except ImportError:
     import re
-from multiprocessing import Pool, Value
+import sys
 from collections import Counter
-from pythomics.templates import CustomParser
-import pythomics.proteomics.config as config
+from multiprocessing import Pool, Value
+
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
+from pythomics.templates import CustomParser
 from pythomics.utils import ColumnFunctions
+
 
 parser = CustomParser(description = description)
 parser.add_fasta(help="The fasta file to match peptides against.")
@@ -233,7 +240,7 @@ def main():
                 pep_set.add(peptide)
                 if peptide not in peptide_history:
                     peptide_history[peptide] = {
-                        'intensities': dict([(i, set([])) for i in xrange(len(precursor_columns))]) if precursor_columns is not None else {},
+                        'intensities': dict([(i, set([])) for i in six.moves.range(len(precursor_columns))]) if precursor_columns is not None else {},
                     }
                 if precursor_columns:
                     for n_i, e_i in enumerate(precursor_columns):
@@ -258,7 +265,7 @@ def main():
 
     peptides = list(set([i.upper() for i in peptide_history.keys()]))
     # break into groups of 100 (empirically gives fastest mapping)
-    subpeptides = [peptides[n:n+peptides_per_core] for n in xrange(0, len(peptides), peptides_per_core)]
+    subpeptides = [peptides[n:n+peptides_per_core] for n in six.moves.range(0, len(peptides), peptides_per_core)]
     if n < len(peptides):
         subpeptides.extend(peptides[n+peptides_per_core:])
     num_peps = len(peptides)
@@ -360,7 +367,7 @@ def main():
             ibaqs = []
             intensities = [sum(d['intensities'][i]) for i in d['intensities']]
             try:
-                precursor_int = sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                precursor_int = sum([intensities[i]/normalizations[i] for i in six.moves.range(len(normalizations))])
             except decimal.InvalidOperation:
                 precursor_int = 0
             entry.append(precursor_int)
@@ -461,7 +468,7 @@ def main():
                         intensities += [sum(d['intensities'][i]) for i in d['intensities']]
                         if ibaq and normalize:
                             try:
-                                precursor_int += sum([intensities[i]/normalizations[i] for i in xrange(len(normalizations))])
+                                precursor_int += sum([intensities[i]/normalizations[i] for i in six.moves.range(len(normalizations))])
                             except decimal.InvalidOperation:
                                 pass
                 entry.append(';'.join(['%s(%s)' % (i,j) for i,j in peptide_psm_count]))
