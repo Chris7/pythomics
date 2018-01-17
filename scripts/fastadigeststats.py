@@ -6,11 +6,17 @@ and summarize how much of the proteome is covered, what residues are missed,
 and what isoforms can be uniquely identified.
 """
 
-import sys, copy, re
+import copy
+import re
+import sys
+
+import six
+
 import pythomics.proteomics.digest as digest
 import pythomics.parsers.fasta as fasta
 import pythomics.proteomics.config as config
 from pythomics.templates import CustomParser
+
 
 parser = CustomParser(description = description)
 parser.add_fasta()
@@ -102,10 +108,10 @@ def main():
             for header in peptides_found[peptide]:
                 found_proteins.add(header)
                 sequence = proteinMap[header]
-                found = covered.get(header,set(xrange(len(sequence))))
+                found = covered.get(header,set(six.moves.range(len(sequence))))
                 sites = [match.start() for match in re.finditer(peptide, sequence)]
                 for match_position in sites:
-                    found -= set(xrange(match_position,match_position+len(peptide)))
+                    found -= set(six.moves.range(match_position,match_position+len(peptide)))
                 covered[header] = found
         avg_cov = 0
         missed_len = 0

@@ -3,7 +3,11 @@ __author__ = 'Chris Mitchell'
 import sys
 import re
 from collections import OrderedDict
-from pythomics.genomics import config
+
+import six
+
+from . import config
+
 
 GENOTYPE_SPLIT = re.compile(r'[\|/]')
 
@@ -263,8 +267,8 @@ class VCFEntry(object):
                     d = self.depth
                 if individual == -1:
                     if len(d) != len(self.samples):
-                        [self.parse_sample(i) for i in xrange(len(self.samples))]
-                    extra[format_] = [d[i] for i in xrange(len(d))]
+                        [self.parse_sample(i) for i in six.moves.range(len(self.samples))]
+                    extra[format_] = [d[i] for i in six.moves.range(len(d))]
                 else:
                     if individual not in d:
                         self.parse_sample(individual)
@@ -323,7 +327,7 @@ class VCFEntry(object):
         """
         #this is a hack to store the # of individuals without having to actually store it
         out = []
-        for i in xrange(len(self.genotype)):
+        for i in six.moves.range(len(self.genotype)):
             valid_alt = self.get_alt_length(individual=i)
             if not valid_alt:
                 out.append(None)

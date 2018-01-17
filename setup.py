@@ -1,19 +1,41 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 
-setup(name='pythomics',
-      version='0.3.44',
-      description='A multi-omic python package',
-      url='https://github.com/pandeylab/pythomics',
-      author='Chris Mitchell',
-      author_email='chris.mit7@gmail.com',
-      install_requires = ['six'],
-      license='GPL3',
-      packages=['pythomics','pythomics.parsers', 'pythomics.proteomics',
-                'pythomics.templates', 'pythomics.tests', 'pythomics.genomics', 'pythomics.utils'],
-      scripts=['pythomics/scripts/fastadigest.py', 'pythomics/scripts/fastadigeststats.py',
-               'pythomics/scripts/incorporateVCF.py', 'pythomics/scripts/fetchOrfs.py',
-               'pythomics/scripts/incorporateGFF.py', 'pythomics/scripts/proteinInference.py',
-               'pythomics/scripts/featureCollapser.py', 'pythomics/scripts/fastxTrimmer.py',
-               'pythomics/scripts/intersectFiles.py', 'pythomics/scripts/junctionalReads.py',
-               'pythomics/scripts/ptmSummary.py'],
-      zip_safe=False)
+
+setup(
+    name='pythomics',
+    version='0.3.43',
+    description='A multi-omic python package',
+    url='https://github.com/pandeylab/pythomics',
+    author='Chris Mitchell',
+    author_email='chris.mit7@gmail.com',
+    install_requires=[
+        'lxml',
+        'six',
+    ],
+    extras_require={
+      'all': [
+          'matplotlib',
+          'pandas',
+          'pysam',
+          'scipy',
+      ],
+    },
+
+    license='GPL3',
+    packages=find_packages(),
+    scripts=[
+        'scripts/fastadigest.py',
+        'scripts/fastadigeststats.py',
+        'scripts/incorporateVCF.py',
+        'scripts/fetchOrfs.py',
+        'scripts/incorporateGFF.py',
+        'scripts/proteinInference.py',
+        'scripts/featureCollapser.py',
+        'scripts/fastxTrimmer.py',
+        'scripts/intersectFiles.py',
+        'scripts/junctionalReads.py',
+        'scripts/ptmSummary.py'
+    ],
+    include_package_data=True,
+    zip_safe=False
+)

@@ -17,27 +17,35 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 __author__ = 'Chris Mitchell'
 
-import sys, copy, struct, base64, gzip, operator, decimal, traceback
-from os import path
-import pythomics.templates as templates
-from pythomics.proteomics.structures import PeptideObject, ScanObject, Chromatogram
-from pythomics.proteomics import config
-import re, os, sqlite3, zipfile, time
-import six
-
-if six.PY3:
-    xrange = range
-from six import string_types
+import base64
+import copy
+import decimal
+import gzip
+import operator
+import os
+import re
+import sqlite3
+import struct
+import sys
+import time
+import traceback
 import xml.etree.cElementTree as cetree
+import zipfile
+
+import six
 try:
     from lxml import etree
 except ImportError:
     import xml.etree.cElementTree as etree
-
 try:
     import msparser
 except ImportError:
     sys.stderr.write('msparser not found, Mascot DAT files unable to be parsed\n')
+
+from .. import templates
+from .structures import PeptideObject, ScanObject, Chromatogram
+from . import config
+
 
 #regex for common use
 scanSplitter = re.compile(r'[\t\s]')
@@ -159,7 +167,7 @@ class GuessIterator(templates.GenericIterator):
                 continue
             setattr(self, i, getattr(self.parser, i))
 
-    def next(self):
+    def _next(self):
         return self.parser.next()
 
 
@@ -203,9 +211,6 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         self.scans = {}
         self.startIter = True
         self.db = None
-
-    def __iter__(self):
-        return self
 
     def find_tags(self, text, tag):
         open = '<'+tag+' '
@@ -356,12 +361,12 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
             # elif spect:
             #     raise StopIteration
 
-    def next(self):
+    def _next(self):
         if self.spectra:
-            spectra = next(self.spectra)
+            spectra = six.next(self.spectra)
             tag = spectra[1].tag
             while not (tag.endswith('spectrum') or tag.endswith('chromatogram')):
-                spectra = next(self.spectra)
+                spectra = six.next(self.spectra)
                 tag = spectra[1].tag
         else:
             raise StopIteration
@@ -389,18 +394,18 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         xml_iter = etree.parse(self.filename, events=('start',)).iter() if self.gzip else etree.iterparse(self.filename, events=('start',))
 
         # this is the indexedmzML header
-        xml_info = xml_iter.next()
+        xml_info = six.next(xml_iter)
         root = xml_info[1]
         if handle is None:
             handle = sys.stdout
-        elif isinstance(handle, six.string_types):
+        elif isinstance(handle, six.six.string_types):
             handle = open(handle, 'w')
 
         # go until we get to the spectrumlist because it contains scans
         spectrumList = root.find('{0}mzML/{0}run/{0}spectrumList'.format(namespace))
         if spectrumList is None:
             while xml_info[1].tag != '{}spectrumList'.format(namespace):
-                xml_info = xml_iter.next()
+                xml_info = six.next(xml_iter)
             spectrumList = xml_info[1]
         indexList = None
         indexOffset = None
@@ -468,14 +473,14 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                 scan = None
                 if id in self.scans:
                     return self.scans[id]
-                for spectra in self.spectra.next():
+                for spectra in six.next(self.spectra):
                     scan = self.parselxml(spectra, full=True)
                     self.scans[scan.id] = scan
                 if id in self.scans:
                     return self.scans[id]
             else:
                 while id not in self.ra:
-                    spectra = self.next()
+                    spectra = six.next(self)
                     if spectra.id == id:
                         return spectra
                 self.filename.seek(int(self.ra[str(id)]))
@@ -513,7 +518,7 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
         super(PepXMLIterator, self).__init__(filename, *args, **kwargs)
         try:
             #find our mzml first
-            mzml = etree.iterparse(self.filename.name, tag=('{http://regis-web.systemsbiology.net/pepXML}msms_run_summary',)).next()[1]
+            mzml = six.next(etree.iterparse(self.filename.name, tag=('{http://regis-web.systemsbiology.net/pepXML}msms_run_summary',)))[1]
             info = dict(mzml.items())
             try:
                 self.mzml = MZMLIterator('%s%s'%(info['base_name'], info['raw_data']))
@@ -543,9 +548,6 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
             self.nest = 0
         self.ptm_regex = re.compile(r'PTMProphet\_[A-Za-z]+([0-9\.\-]+)')
         self.db = None
-
-    def __iter__(self):
-        return self
 
     def parselxml(self, spectra, full=False, namespace='{http://regis-web.systemsbiology.net/pepXML}'):
         if spectra.tag == '{0}spectrum_query'.format(namespace):
@@ -632,9 +634,9 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
         else:
             raise StopIteration
 
-    def next(self):
+    def _next(self):
         if self.spectra:
-            spectra = self.spectra.next()
+            spectra = six.next(self.spectra)
         else:
             raise StopIteration
         return self.parselxml(spectra[1])
@@ -716,9 +718,6 @@ class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
         self.ptm_regex = re.compile(r'PTMProphet\_[A-Za-z]+([0-9\.\-]+)')
         self.db = None
 
-    def __iter__(self):
-        return self
-
     def unpack_array(self, array, params, namespace='{http://psi.hupo.org/ms/mzml}'):
         if 'zlib compression' in params:
             import zlib
@@ -726,9 +725,9 @@ class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
         else:
             array = base64.b64decode(array)
         if params.get('precision', False) == '64':
-            array = [struct.unpack('d', array[i:i+8])[0] for i in xrange(0, len(array), 8)]
+            array = [struct.unpack('d', array[i:i+8])[0] for i in six.moves.range(0, len(array), 8)]
         else:
-            array = [struct.unpack('f', array[i:i+4])[0] for i in xrange(0, len(array), 4)]
+            array = [struct.unpack('f', array[i:i+4])[0] for i in six.moves.range(0, len(array), 4)]
         return array
 
     def parselxml(self, spectra, full=False, namespace=''):
@@ -748,9 +747,9 @@ class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
             self.scans[scanId] = scanObj
         return scanObj
 
-    def next(self):
+    def _next(self):
         if self.spectra:
-            spectra = self.spectra.next()
+            spectra = six.next(self.spectra)
         else:
             raise StopIteration
         return self.parselxml(spectra[1])
@@ -804,9 +803,6 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
             return
         self.scans = {}
         self.num = 1
-
-    def __iter__(self):
-        return self
 
     def parseModel(self, element):
         charge = int(element.attrib.get("z", 'NA'))
@@ -886,14 +882,14 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
             return scan
         return None
 
-    def next(self):
+    def _next(self):
         if self.group:
-            element = self.group.next()
+            element = six.next(self.group)
             while element.getparent().tag != 'bioml':
-                element = self.group.next()
+                element = six.next(self.group)
             scan = self.parselxml(element)
             while scan is None:
-                scan = self.next()
+                scan = six.next(self)
             return scan
         else:
             raise StopIteration
@@ -926,7 +922,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename, **kwrds):
         super(MGFIterator, self).__init__(filename, **kwrds)
         #load our index
-        indexFile=''.join(path.splitext(self.filename.name)[0])+'.mgfi'
+        indexFile=''.join(os.path.splitext(self.filename.name)[0])+'.mgfi'
         self.scanSplit = re.compile(r'[\s\t]')
         self.rand = True
         self.titleMap = {}
@@ -951,7 +947,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
             f = open(path, 'wb')
             while True:
                 try:
-                    self.next()
+                    six.next(self)
                 except StopIteration:
                     break
             for i in self.ra:
@@ -1010,10 +1006,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
             return scanObj
         return None
 
-    def __iter__(self):
-        return self
-
-    def next(self):
+    def _next(self):
         row = self.filename.readline()
         if row == '':
             raise StopIteration
@@ -1081,14 +1074,14 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
             self.uModFile = msparser.ms_umod_configfile("unimod.xml", "unimod_2.xsd")
         if self.quantMethod:
             self.quantSubs = {}
-            for i in xrange(self.quantMethod.getNumberOfModificationGroups()):
+            for i in six.moves.range(self.quantMethod.getNumberOfModificationGroups()):
                 modGroup = self.quantMethod.getModificationGroupByNumber(i)
                 for j in modGroup.getNumberOfLocalDefinitions():
                     sys.stderr.write('qunt sub thing %s\n'%modGroup.getLocalDefinitions(j))
                     sys.stderr.write('get from the unimod xml later\n')
-            for i in xrange(self.quantMethod.getNumberOfComponents()):
+            for i in six.moves.range(self.quantMethod.getNumberOfComponents()):
                 objComponent = self.quantMethod.getComponentByNumber(i)
-                for j in xrange(objComponent.getNumberOfModificationGroups()):
+                for j in six.moves.range(objComponent.getNumberOfModificationGroups()):
                     modGroup = objComponent.getModificationGroupByNumber(j)
                     for k in modGroup.getNumberOfLocalDefinitions():
                         sys.stderr.write('qunt sub thing%s\n'%modGroup.getLocalDefinitions(k))
@@ -1201,10 +1194,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                                 }
         self.scanMap = {}
 
-    def __iter__(self):
-        return self
-
-    def next(self):
+    def _next(self):
         self.hit+=1
         return self.parseScan(self.hit)
 
@@ -1263,8 +1253,8 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                     inputQuery = msparser.ms_inputquery(self.resfile,query)
                     stitle = inputQuery.getStringTitle(True)
                     if full:
-                        for ionIndex in xrange(1,4):
-                            for peakIndex in xrange(inputQuery.getNumberOfPeaks(ionIndex)):
+                        for ionIndex in six.moves.range(1,4):
+                            for peakIndex in six.moves.range(inputQuery.getNumberOfPeaks(ionIndex)):
                                 scanObj.scans.append((inputQuery.getPeakMass(ionIndex,peakIndex),float(inputQuery.getPeakIntensity(ionIndex,peakIndex))))
                         ionsUsed = pep.getSeriesUsedStr()
                         aaHelperStr = pep.getComponentStr()
@@ -1281,7 +1271,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                                 if (rule == 2 and charge >1) or (rule == 3 and charge > 2):
                                     chargeRule = 2
                             else:
-                                for chargeState in xrange(charge+1):
+                                for chargeState in six.moves.range(charge+1):
                                     if (chargeState == 1 and chargeRule == 1) or (chargeState == 2 and chargeRule == 2) and rule not in self.cRules:
                                         frags = msparser.ms_fragmentvector()
                                         errs = msparser.ms_errs()
@@ -1294,7 +1284,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
                                             sys.stderr.write('%s\n'%errs.getLastErrorString())
                                         else:
                                             frags.addExperimentalData(self.resfile, query)
-                                            for frag in (frags.getFragmentByNumber(fragIndex) for fragIndex in xrange(frags.getNumberOfFragments())):
+                                            for frag in (frags.getFragmentByNumber(fragIndex) for fragIndex in six.moves.range(frags.getNumberOfFragments())):
                                                 if frag.getMatchedIonMass() > 0:
                                                     if frag.isInternal():
                                                         startSite = frag.getStart()
@@ -1336,7 +1326,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
         self.clvl = clvl
         self.full = full
         self.srank = srank
-        if isinstance(filename, string_types):
+        if isinstance(filename, six.string_types):
             self.f = open(filename, 'rb')
         else:
             raise Exception(TypeError,"Unknown Type of filename -- must be a file path")
@@ -1668,7 +1658,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             return scanObj
         return None
 
-    def next(self):
+    def _next(self):
         if not self.scans:
             i = self.cur.fetchone()
             #we go by groups
@@ -1919,7 +1909,7 @@ class MQIterator(templates.GenericIterator, GenericProteomicIterator):
             return scanObj
         return None
 
-    def next(self):
+    def _next(self):
         if not self.scans:
             i = self.cur.fetchone()
             #we go by groups
