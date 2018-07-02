@@ -398,7 +398,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
         root = xml_info[1]
         if handle is None:
             handle = sys.stdout
-        elif isinstance(handle, six.six.string_types):
+        elif isinstance(handle, six.string_types):
             handle = open(handle, 'w')
 
         # go until we get to the spectrumlist because it contains scans
