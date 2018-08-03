@@ -519,6 +519,7 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
         try:
             #find our mzml first
             mzml = six.next(etree.iterparse(self.filename.name, tag=('{http://regis-web.systemsbiology.net/pepXML}msms_run_summary',)))[1]
+            self.mzml_file = mzml
             info = dict(mzml.items())
             try:
                 self.mzml = MZMLIterator('%s%s'%(info['base_name'], info['raw_data']))
@@ -531,7 +532,10 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
                     self.mzml = MZMLIterator('%s%s'%(new_path, info['raw_data']))
                 except IOError:
                     # one more try for a gz
-                    self.mzml = MZMLIterator('%s%s.gz'%(new_path, info['raw_data']))
+                    try:
+                        self.mzml = MZMLIterator('%s%s.gz'%(new_path, info['raw_data']))
+                    except IOError:
+                        self.mzml = None
             self.filename.seek(0)
             dom1 = etree.iterparse(self.filename.name, tag=('{http://regis-web.systemsbiology.net/pepXML}spectrum_query',))
             self.lxml = True
@@ -568,7 +572,7 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
             rt = float(pep_info.get('retention_time_sec', 0))
             rt = float(rt/60)+int(rt%60)/100.0
             pepObj.rt = rt
-            pepObj.file = self.mzml.filename.name
+            pepObj.file = self.mzml.filename.name if self.mzml else self.mzml_file
             # get our search result
             search_result = spectra.find('{0}search_result/'.format(namespace))
             if search_result is None:
@@ -610,7 +614,7 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
             else:
                 pepObj.expect = 1
             accession = [search_info.get('protein', '')]
-            alt_proteins = search_result.findall('{0}alternative_protein'.format(namespace))
+            alt_proteins = search_result.findall('.//{0}alternative_protein'.format(namespace))
             accession += [i.get('protein') for i in alt_proteins]
             pepObj.peptide = peptide
             pepObj.acc = ';'.join(accession)
@@ -620,7 +624,7 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
                     for mass, prob in modification.iteritems():
                         pepObj.addModification(mod_aa, position, mass, '%s(%s)'%(mass, prob))
             else:
-                mods = search_result.findall('{0}mod_aminoacid_mass'.format(namespace))
+                mods = search_result.findall('.//{0}mod_aminoacid_mass'.format(namespace))
                 for i in mods:
                     mod_info = dict(i.items())
                     mod_pos = int(mod_info['position'])-1
@@ -628,8 +632,9 @@ class PepXMLIterator(XMLFileNameMixin, GenericProteomicIterator, templates.Gener
                     pepObj.addModification(mod_aa, mod_pos, mod_info['mass'], mod_info['mass'])
             # self.scans[title] = pepObj
             # get our mz/intensities
-            scanInfo = self.mzml.getScan(start_scan, peptide=peptide)
-            pepObj.scans = scanInfo.scans
+            if self.mzml:
+                scanInfo = self.mzml.getScan(start_scan, peptide=peptide)
+                pepObj.scans = scanInfo.scans
             return pepObj
         else:
             raise StopIteration
