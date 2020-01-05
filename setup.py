@@ -4,7 +4,7 @@ setup(
     name='pythomics',
     version='0.3.46',
     description='A multi-omic python package',
-    url='https://github.com/pandeylab/pythomics',
+    url='https://github.com/chris7/pythomics',
     author='Chris Mitchell',
     author_email='chris.mit7@gmail.com',
     install_requires=[
