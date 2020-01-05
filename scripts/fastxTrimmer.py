@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 description = """
 This script will trim N's from the ends of a fasta/fastq file so it can be

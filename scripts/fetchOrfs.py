@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 description = """
 This script will accept a given nucleotide fasta file and output
