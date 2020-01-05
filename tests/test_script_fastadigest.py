@@ -13,6 +13,7 @@ class Test_Script_Fasta_Digest(unittest.TestCase):
         job = subprocess.Popen([os.path.join(self.script_dir, 'fastadigest.py'), '-f', self.nucleotide_file, '--genome', '--min', '0',
                                 '--frame', '6', '--max', '99999', '--enzyme', 'none'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         res = job.stdout.read()
+        print('res is', res)
         digest = hashlib.sha224(res).hexdigest()
         self.assertEqual('21ded78615bbfb3ef03969fee9a3d0475f8dac2e77ac7026039b693d', digest, "Fasta Genome Digest Test 1 Failure.")
         job = subprocess.Popen([os.path.join(self.script_dir, 'fastadigest.py'), '-f', self.nucleotide_file, '--genome', '--min', '0',
