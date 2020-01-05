@@ -21,6 +21,7 @@ class Test_Fasta_Iterator(unittest.TestCase):
     def test_fasta_get_sequence(self):
         f = parser.FastaIterator(self.handle, index=self.index)
         out = f.get_sequence('c1', 5, 30)
+        print('out is', out)
         digest = hashlib.sha224(out.encode('utf-8')).hexdigest()
         self.assertEqual( 'ddb5a96ada0f651bffeb8ef856c76faf610ca669a68be904b0acb8b8', digest, "Fasta get_sequence #1 Failure")
         f.fasta_file.close()
