@@ -112,9 +112,9 @@ class FastaIterator(templates.GenericIterator):
         #go to start of chromosome
         seekpos = int(self.sequence_index[chrom][1])
         #find how many newlines we have
-        seekpos += start+start/divisor
+        seekpos += start+start//divisor
         slen = end-start
-        endpos = int(slen + (slen/divisor) + 1) #a hack of sorts but it works and is easy
+        endpos = int(slen + (slen//divisor) + 1) #a hack of sorts but it works and is easy
         self.fasta_file.seek(seekpos, 0)
         output = self.fasta_file.read(endpos)
         output = output.replace('\n', '')
