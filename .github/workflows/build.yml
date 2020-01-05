@@ -24,4 +24,5 @@ jobs:
     - name: Run Tests
       run: |
         env
+        ls -l /opt/hostedtoolcache/Python/3.7.5/x64/bin
         make test
