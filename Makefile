@@ -1,5 +1,5 @@
 testenv:
-	pip install -r requirements.txt
+	pip install -r requirements/testing.txt
 	pip install -e .
 
 test:
