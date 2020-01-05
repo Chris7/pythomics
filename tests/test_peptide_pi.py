@@ -11,6 +11,7 @@ class Test_Peptide_Structure(unittest.TestCase):
         
     def test_peptide_charge(self):
         self.assertEqual('%1.6f' % peptide.Peptide('PEPTIDE').getCharge(), '-2.998019', "Peptide Mass test failure.")
-        
-suite = unittest.TestLoader().loadTestsFromTestCase(Test_Peptide_Structure)
-unittest.TextTestRunner(verbosity=2).run(suite)
+
+if __name__ == '__main__':
+    suite = unittest.TestLoader().loadTestsFromTestCase(Test_Peptide_Structure)
+    unittest.TextTestRunner(verbosity=2).run(suite)

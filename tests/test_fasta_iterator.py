@@ -31,7 +31,7 @@ class Test_Fasta_Iterator(unittest.TestCase):
         out = '\n'.join([row.decode('utf-8').strip() for row in open(self.index, 'rb')])
         digest = hashlib.sha224(out.encode('utf-8')).hexdigest()
         self.assertEqual( 'e071a4ec04e59d55231dc667e06b81b17d96fad0d40fe2ac883e9fe3', digest, "Fasta Index Build Failure")
-        
-        
-suite = unittest.TestLoader().loadTestsFromTestCase(Test_Fasta_Iterator)
-unittest.TextTestRunner(verbosity=2).run(suite)
+
+if __name__ == '__main__':
+    suite = unittest.TestLoader().loadTestsFromTestCase(Test_Fasta_Iterator)
+    unittest.TextTestRunner(verbosity=2).run(suite)

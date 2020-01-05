@@ -31,6 +31,6 @@ class Test_VCF_Iterator(unittest.TestCase):
     def test_vcf_alleles(self):
         pass
 
-
-suite = unittest.TestLoader().loadTestsFromTestCase(Test_VCF_Iterator)
-unittest.TextTestRunner(verbosity=2).run(suite)
+if __name__ == '__main__':
+    suite = unittest.TestLoader().loadTestsFromTestCase(Test_VCF_Iterator)
+    unittest.TextTestRunner(verbosity=2).run(suite)

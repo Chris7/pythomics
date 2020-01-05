@@ -24,6 +24,7 @@ class Test_Protein_Digestion(unittest.TestCase):
         peptides = ''.join(enzyme.cleave(out, min=0,max=9999, unique=True))
         hash_sum = hashlib.sha224(peptides.encode('utf-8')).hexdigest()
         self.assertEqual( '2b5e17ce606e9a296095d8b4b9cf75d44ba662d5eb3531e0a187def4', hash_sum, "Unique Protein Digestion with Lys-C Failure")
-        
-suite = unittest.TestLoader().loadTestsFromTestCase(Test_Protein_Digestion)
-unittest.TextTestRunner(verbosity=2).run(suite)
+
+if __name__ == '__main__':
+    suite = unittest.TestLoader().loadTestsFromTestCase(Test_Protein_Digestion)
+    unittest.TextTestRunner(verbosity=2).run(suite)
