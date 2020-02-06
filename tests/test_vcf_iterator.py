@@ -11,7 +11,6 @@ class Test_VCF_Iterator(unittest.TestCase):
         self.handle = os.path.join(data_dir, 'valid-4.0.vcf')
 
     def test_vcf_iterator(self):
-        out = ""
         f = parser.VCFIterator(self.handle)
         assert(isinstance(f, parser.VCFIterator))
         entries = [str(row) for row in f]
