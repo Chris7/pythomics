@@ -147,7 +147,6 @@ class FastaIterator(templates.GenericIterator):
                     if header:
                         #this is always the LAST header
                         self.sequence_index[stripped_header] = (sequence_read, header_end[stripped_header], without_break[stripped_header], with_break[stripped_header])
-                        sequence_read = 0
                     header = m.group(1)
                     stripped_header = header.strip()
                     header_order.append(stripped_header)
@@ -160,7 +159,9 @@ class FastaIterator(templates.GenericIterator):
                     sequence_read += len(row.strip())
                 row = f.readline()
             #for the last one we found
-            header_order.append(stripped_header)
+            if stripped_header not in header_order:
+                header_order.append(stripped_header)
+
             self.sequence_index[stripped_header] = (sequence_read, header_end[stripped_header], without_break[stripped_header], with_break[stripped_header])
             for header in header_order:
                 d = self.sequence_index[header]
