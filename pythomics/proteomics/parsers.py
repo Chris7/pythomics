@@ -88,6 +88,12 @@ def indent_xml(elem, level=0):
             elem.tail = i
 
 
+def maybe_decode(f):
+    if isinstance(f, bytes):
+        return f.decode("utf-8")
+    return f
+
+
 class GenericProteomicIterator(object):
     """
     Generics to be overridden
@@ -615,7 +621,7 @@ class MZMLIterator(
 
         indexList.tail = "\n"
         indent_xml(root)
-        contents = etree.tostring(root, pretty_print=True).decode("utf-8")
+        contents = maybe_decode(etree.tostring(root, pretty_print=True))
         scan_offset = contents.find("<spectrumList") + 14
         del contents
         scan_indices = []
@@ -639,7 +645,7 @@ class MZMLIterator(
             )
             offset.text = scan_offset_info["offset"]
         indent_xml(root)
-        contents = etree.tostring(root, pretty_print=True).decode("utf-8")
+        contents = maybe_decode(etree.tostring(root, pretty_print=True))
         if indexOffset is not None:
             index_offset = contents.find("<indexListOffset")
             indexOffset.text = str(index_offset)
@@ -670,7 +676,7 @@ class MZMLIterator(
                     if spectra.id == id:
                         return spectra
                 self.filename.seek(int(self.ra[str(id)]))
-                entry = self.filename.readline().decode("utf-8")
+                entry = maybe_decode(self.filename.readline())
                 opening_tags = ["<spectrum ", "<chromatogram "]
                 while entry:
                     matching_tags = list(
@@ -684,13 +690,13 @@ class MZMLIterator(
                             0
                         ][1][1:].strip()
                         break
-                    entry = self.filename.readline().decode("utf-8")
+                    entry = maybe_decode(self.filename.readline())
                 if not entry:
                     return None
                 row = [entry]
                 closing_tag = "</{}>".format(opening_tag)
                 while entry and closing_tag not in entry:
-                    entry = self.filename.readline().decode("utf-8")
+                    entry = maybe_decode(self.filename.readline())
                     row.append(entry)
                 if xml:
                     spectra = etree.fromstring("".join(row))
