@@ -3,7 +3,7 @@ import six
 
 class ColumnFunctions(object):
     strict = False
-    METHODS = ['concat', 'mean', 'median', 'var', 'std', 'sum', 'count']
+    METHODS = ["concat", "mean", "median", "var", "std", "sum", "count"]
 
     def __init__(self, parser_args):
         if parser_args.strict:
@@ -14,10 +14,11 @@ class ColumnFunctions(object):
             l = list(l)
         if self.strict:
             try:
-                l = [float(i) for i in l if i != '']
+                l = [float(i) for i in l if i != ""]
             except ValueError:
                 import sys
-                sys.stderr.write('Invalid entry found in list %s.\n'%l)
+
+                sys.stderr.write("Invalid entry found in list %s.\n" % l)
                 raise ValueError
         else:
             nl = []
@@ -31,18 +32,18 @@ class ColumnFunctions(object):
 
     def concat(self, l):
         if not len(l):
-            return 'NA'
-        return ';'.join([str(i) for i in l])
+            return "NA"
+        return ";".join([str(i) for i in l])
 
     def mean(self, l):
         if not len(l):
-            return 'NA'
+            return "NA"
         l = self.process_list(l)
-        return sum(l)/float(len(l))
+        return sum(l) / float(len(l))
 
     def median(self, l):
         if not len(l):
-            return 'NA'
+            return "NA"
         elif len(l) == 1:
             if isinstance(l, set):
                 return six.next(iter(l))
@@ -50,37 +51,38 @@ class ColumnFunctions(object):
                 return l[0]
         l = self.process_list(l, ordered=True)
         l_sorted = sorted(l)
-        mid = len(l_sorted)/2
-        if len(l_sorted)%2:
+        mid = len(l_sorted) / 2
+        if len(l_sorted) % 2:
             # odd
             return l_sorted[mid]
         else:
-            return self.mean(l_sorted[mid-1:mid+1])
+            return self.mean(l_sorted[mid - 1 : mid + 1])
 
     def var(self, l):
         if not len(l):
-            return 'NA'
+            return "NA"
         elif len(l) == 1:
             return 0
         l = self.process_list(l)
         sample_mean = self.mean(l)
         dev = 0
         for x in l:
-            dev += (x - sample_mean)*(x - sample_mean)
-        return dev/(len(l)-1)
+            dev += (x - sample_mean) * (x - sample_mean)
+        return dev / (len(l) - 1)
 
     def std(self, l):
         if not len(l):
-            return 'NA'
+            return "NA"
         elif len(l) == 1:
             return 0
         l = self.process_list(l)
         import math
+
         return math.sqrt(self.var(l))
 
     def sum(self, l):
         if not len(l):
-            return 'NA'
+            return "NA"
         l = self.process_list(l)
         return sum(l)
 

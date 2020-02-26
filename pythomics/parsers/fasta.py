@@ -9,17 +9,25 @@ from . import config
 
 
 def _reverse_complement(seq):
-    return ''.join([config.BASE_PAIR_COMPLEMENTS.get(i, 'N') for i in reversed(seq)])
+    return "".join([config.BASE_PAIR_COMPLEMENTS.get(i, "N") for i in reversed(seq)])
+
 
 def _complement(seq):
-    return ''.join([config.BASE_PAIR_COMPLEMENTS.get(i, 'N') for i in seq])
+    return "".join([config.BASE_PAIR_COMPLEMENTS.get(i, "N") for i in seq])
+
 
 def _translate(seq):
     seq = seq.upper()
-    return ''.join([config.CODON_TABLE.get(seq[i:i+3],'') for i in six.moves.range(0,len(seq.upper()),3)])
+    return "".join(
+        [
+            config.CODON_TABLE.get(seq[i : i + 3], "")
+            for i in six.moves.range(0, len(seq.upper()), 3)
+        ]
+    )
+
 
 class FastaIterator(templates.GenericIterator):
-    def __init__(self, filename, delimiter='>', **kwrds):
+    def __init__(self, filename, delimiter=">", **kwrds):
         """
         Optional argument: delimiter -- > default
         """
@@ -28,23 +36,23 @@ class FastaIterator(templates.GenericIterator):
         self.fasta_index = False
         self.delimiter = delimiter
         self.delimiter_length = len(delimiter)
-        self.parse = kwrds.get('parse', None)
+        self.parse = kwrds.get("parse", None)
         if self.parse:
             self.parse = re.compile(self.parse)
-        #look for an index
-        self.fasta_index = kwrds.get('index', None)
+        # look for an index
+        self.fasta_index = kwrds.get("index", None)
         if not self.fasta_index:
-            if os.path.exists('%s.%s' % (self.fasta_file.name, 'fai')):
-                self.fasta_index = '%s.%s' % (self.fasta_file.name, 'fai')
-            elif os.path.exists('%s.%s' % (self.fasta_file.name, 'faidx')):
-                self.fasta_index = '%s.%s' % (self.fasta_file.name, 'faidx')
+            if os.path.exists("%s.%s" % (self.fasta_file.name, "fai")):
+                self.fasta_index = "%s.%s" % (self.fasta_file.name, "fai")
+            elif os.path.exists("%s.%s" % (self.fasta_file.name, "faidx")):
+                self.fasta_index = "%s.%s" % (self.fasta_file.name, "faidx")
             if self.fasta_index:
                 self.open_fasta_index()
             else:
                 self.fasta_index = None
         self.sequence_index = {}
         self.row = None
-        
+
     def _next(self):
         seq = ""
         row = self.row
@@ -54,10 +62,10 @@ class FastaIterator(templates.GenericIterator):
         if self.parse:
             header = self.parse.match(row)
         else:
-            header = row.strip()[self.delimiter_length:]
-        #get our sequence
+            header = row.strip()[self.delimiter_length :]
+        # get our sequence
         row = six.next(self.fasta_file)
-        while row and row[0:self.delimiter_length] != self.delimiter:
+        while row and row[0 : self.delimiter_length] != self.delimiter:
             seq += row.strip()
             try:
                 row = six.next(self.fasta_file)
@@ -65,29 +73,33 @@ class FastaIterator(templates.GenericIterator):
                 return header, seq
         self.row = row
         return header, seq
-        
+
     def open_fasta_index(self):
         """
         custom type for file made w/ buildFastaIndex, fai for ones made with samtools
         """
         index = self.fasta_index
         try:
-            handle = open(index, 'rb')
+            handle = open(index, "rb")
         except (IOError, TypeError):
-            sys.stderr.write('index not found, creating it\n')
+            sys.stderr.write("index not found, creating it\n")
             try:
                 self.build_fasta_index()
                 return
             except IOError:
-                raise IOError("Index File "+self.fasta_index+"can't be found nor created, check file permissions")
+                raise IOError(
+                    "Index File "
+                    + self.fasta_index
+                    + "can't be found nor created, check file permissions"
+                )
         self.sequence_index = {}
         _seq_dict = self.sequence_index
         for row in handle:
-            entry = row.decode('utf-8').strip().split('\t')
-            #stored as: {header: length, # of chars to end of this header, length of fasta lines, length of each line including breakchar}
+            entry = row.decode("utf-8").strip().split("\t")
+            # stored as: {header: length, # of chars to end of this header, length of fasta lines, length of each line including breakchar}
             _seq_dict[entry[0]] = (entry[1], entry[2], entry[3], entry[4])
-            
-    def get_sequence(self, chrom, start, end, strand='+', indexing=(-1, 0)):
+
+    def get_sequence(self, chrom, start, end, strand="+", indexing=(-1, 0)):
         """
         chromosome is entered relative to the file it was built with, so it can be 'chr11' or '11',
         start/end are coordinates, which default to python style [0,1) internally. So positions should be
@@ -101,34 +113,44 @@ class FastaIterator(templates.GenericIterator):
             try:
                 divisor = int(self.sequence_index[chrom][2])
             except KeyError:
-                sys.stderr.write("%s cannot be found within the fasta index file.\n" % chrom)
+                sys.stderr.write(
+                    "%s cannot be found within the fasta index file.\n" % chrom
+                )
                 return ""
-        start+=indexing[0]
-        end+=indexing[1]
-        #is it a valid position?
-        if ( start < 0 or end > int(self.sequence_index[chrom][0] )):
-            raise ValueError("The range %d-%d is invalid. Valid range for this feature is 1-%d." % (start-indexing[0], end-indexing[1], 
-                                                                                                     int(self.sequence_index[chrom][0])))
-        #go to start of chromosome
+        start += indexing[0]
+        end += indexing[1]
+        # is it a valid position?
+        if start < 0 or end > int(self.sequence_index[chrom][0]):
+            raise ValueError(
+                "The range %d-%d is invalid. Valid range for this feature is 1-%d."
+                % (
+                    start - indexing[0],
+                    end - indexing[1],
+                    int(self.sequence_index[chrom][0]),
+                )
+            )
+        # go to start of chromosome
         seekpos = int(self.sequence_index[chrom][1])
-        #find how many newlines we have
-        seekpos += start+start//divisor
-        slen = end-start
-        endpos = int(slen + (slen//divisor) + 1) #a hack of sorts but it works and is easy
+        # find how many newlines we have
+        seekpos += start + start // divisor
+        slen = end - start
+        endpos = int(
+            slen + (slen // divisor) + 1
+        )  # a hack of sorts but it works and is easy
         self.fasta_file.seek(seekpos, 0)
         output = self.fasta_file.read(endpos)
-        output = output.replace('\n', '')
+        output = output.replace("\n", "")
         out = output[:slen]
-        if strand == '+' or strand == 1:
+        if strand == "+" or strand == 1:
             return out
-        if strand == '-' or strand == -1:
+        if strand == "-" or strand == -1:
             return _reverse_complement(out)
-    
+
     def build_fasta_index(self):
-        with open('%s.fai'%self.fasta_file.name, 'wb') as o:
+        with open("%s.fai" % self.fasta_file.name, "wb") as o:
             f = self.fasta_file
             if not self.parse:
-                chromReg = re.compile(r'%s(.+)'%self.delimiter)
+                chromReg = re.compile(r"%s(.+)" % self.delimiter)
             else:
                 chromReg = self.parse
             row = f.readline()
@@ -145,8 +167,13 @@ class FastaIterator(templates.GenericIterator):
                 if m:
                     header_end[m.group(1).strip()] = total_read
                     if header:
-                        #this is always the LAST header
-                        self.sequence_index[stripped_header] = (sequence_read, header_end[stripped_header], without_break[stripped_header], with_break[stripped_header])
+                        # this is always the LAST header
+                        self.sequence_index[stripped_header] = (
+                            sequence_read,
+                            header_end[stripped_header],
+                            without_break[stripped_header],
+                            with_break[stripped_header],
+                        )
                     header = m.group(1)
                     stripped_header = header.strip()
                     header_order.append(stripped_header)
@@ -158,11 +185,20 @@ class FastaIterator(templates.GenericIterator):
                         without_break[stripped_header] = len(row.strip())
                     sequence_read += len(row.strip())
                 row = f.readline()
-            #for the last one we found
+            # for the last one we found
             if stripped_header not in header_order:
                 header_order.append(stripped_header)
 
-            self.sequence_index[stripped_header] = (sequence_read, header_end[stripped_header], without_break[stripped_header], with_break[stripped_header])
+            self.sequence_index[stripped_header] = (
+                sequence_read,
+                header_end[stripped_header],
+                without_break[stripped_header],
+                with_break[stripped_header],
+            )
             for header in header_order:
                 d = self.sequence_index[header]
-                o.write('{}\t{}\t{}\t{}\t{}\n'.format(header, d[0], d[1], d[2], d[3]).encode('utf-8'))
+                o.write(
+                    "{}\t{}\t{}\t{}\t{}\n".format(
+                        header, d[0], d[1], d[2], d[3]
+                    ).encode("utf-8")
+                )

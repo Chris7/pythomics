@@ -2,6 +2,7 @@ import six
 
 from .. import templates
 
+
 class FastqIterator(templates.GenericIterator):
     def _next(self):
         # return is sequence header, sequence, quality header, quality sequence
