@@ -19,15 +19,12 @@ __author__ = "Chris Mitchell"
 
 import base64
 import copy
-import decimal
-import gzip
 import operator
 import os
 import re
 import sqlite3
 import struct
 import sys
-import time
 import traceback
 import xml.etree.cElementTree as cetree
 import zipfile
@@ -154,7 +151,7 @@ class XMLFileNameMixin(object):
                 return dict(
                     [i.split("=", 1) for i in value.split(" ") if "=" in i]
                 ).get("scan", value)
-            except:
+            except Exception:
                 pass
         if self.filetype == "wiff":
             identifier = "transition="
@@ -169,7 +166,7 @@ class XMLFileNameMixin(object):
                 return dict(
                     [i.split("=", 1) for i in value.split(" ") if "=" in i]
                 ).get("scanId", value)
-            except:
+            except Exception:
                 pass
         return value
 
@@ -501,7 +498,7 @@ class MZMLIterator(
                     scanObj.rt = float(rt)
                     try:
                         title = int(title)
-                    except:
+                    except Exception:
                         pass
                     if (not self.ms_filter or ms_level == self.ms_filter) and full:
                         mzmls, intensities = spectra.findall(
@@ -533,7 +530,7 @@ class MZMLIterator(
                         )
                         scanObj.scans = list(zip(mzmls, intensities))
                     return scanObj
-        except:
+        except Exception:
             import traceback
 
             sys.stderr.write(
@@ -703,7 +700,7 @@ class MZMLIterator(
                     return spectra
                 spectra = cetree.fromstring("".join(row))
             return self.parselxml(spectra, full=True, namespace="")
-        except:
+        except Exception:
             sys.stderr.write(
                 "Unable to parse scan {}:\n{}\n".format(id, traceback.format_exc())
             )
@@ -1135,7 +1132,7 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
                         ]
                 try:
                     scanObj.scans = [(float(j), float(k)) for j, k in zip(mz, inten)]
-                except:
+                except Exception:
                     return None
 
         proteins = element.iterfind("protein")
@@ -1258,7 +1255,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
         """
         allows random lookup
         """
-        if self.ra.has_key(title):
+        if title in self.ra:
             self.filename.seek(self.ra[title][0], 0)
             toRead = self.ra[title][1] - self.ra[title][0]
             info = self.filename.read(toRead)
@@ -1328,7 +1325,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                 scan = self.parseScan(scanInfo)
                 if scan:
                     if self.rand:
-                        self.ra[scan.id] = (pStart, pos)
+                        self.ra[scan.id] = (pStart, pos)  # noqa: F821
                     return scan
                 return None
             elif setupScan:
@@ -1567,7 +1564,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
     def getScan(self, title, peptide=None):
         try:
             return self.scanMap[(title, peptide)]
-        except:
+        except Exception:
             return None
 
     def parseScan(self, hit, full=True, peprank=False):
@@ -1987,7 +1984,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
             #     break
             try:
                 tup = self.cur.fetchone()
-            except:
+            except Exception:
                 sys.stderr.write(
                     "Error fetching scan:\n{}\n".format(traceback.format_exc())
                 )
@@ -2001,7 +1998,7 @@ class ThermoMSFIterator(templates.GenericIterator, GenericProteomicIterator):
                         yield scan
                     try:
                         tup = self.cur.fetchone()
-                    except:
+                    except Exception:
                         sys.stderr.write(
                             "Error fetching scan:\n{}\n".format(traceback.format_exc())
                         )
