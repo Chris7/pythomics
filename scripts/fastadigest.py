@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 description = """
 This script will digest a given fasta file with the specified enzymes. 

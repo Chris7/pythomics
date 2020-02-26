@@ -1,4 +1,5 @@
-import os, unittest, hashlib, sys
+import os, sys, unittest
+
 import pythomics.parsers.fasta as parser
  
 class Test_Fasta_Iterator(unittest.TestCase):
@@ -10,28 +11,28 @@ class Test_Fasta_Iterator(unittest.TestCase):
         self.index = '{}.{}'.format(self.handle, 'fai')
          
     def test_fasta_iterator(self):
-        out = ""
         f = parser.FastaIterator(self.handle, delimiter='>')
         assert(isinstance(f, parser.FastaIterator))
+        headers = []
+        sequences = []
         for header, sequence in f:
-            out += ">%s\n%s\n"%(header,sequence)
-        digest = hashlib.sha224(out.encode('utf-8')).hexdigest()
-        self.assertEqual( 'a4b6987095e97824cbcb36674f9757c4ccfad161eeb9fd8a993e851a', digest, "Fasta Iterator Failure")
+            headers.append(header)
+            sequences.append(sequence)
+        self.assertEqual(headers, ['c1', 'c2', 'c3'])
+        self.assertEqual(sequences[1], 'MSCRQFSSSYLSRSGGGGGGGLGSGGSIRSSYSRFSSSGGRGGGGRFSSSSGYGGGSSRVCGRGGGGSFGYSYGGGSGGGFSASSLGGGFGGGSRGFGGASGGGYSSSGGFGGGFGGGSGGGFGGGYGSGFGGLGGFGGGAGGGDGGILTANEKSTMQELNSRLASYLDKVQALEEANNDLENKIQDWYDKKGPAAIQKNYSPYYNTIDDLKDQIVDLTVGNNKTLLDIDNTRMTLDDFRIKFEMEQNLRQGVDADINGLRQVLDNLTMEKSDLEMQYETLQEELMALKKNHKEEMSQLTGQNSGDVNVEINVAPGKDLTKTLNDMRQEYEQLIAKNRKDIENQYETQITQIEHEVSSSGQEVQSSAKEVTQLRHGVQELEIELQSQLSKKAALEKSLEDTKNRYCGQLQMIQEQISNLEAQITDVRQEIECQNQEYSLLLSIKMRLEKEIETYHNLLEGGQEDFESSGAGKIGLGGRGGSGGSYGRGSRGGSGGSYGGGGSGGGYGGGSGSRGGSGGSYGGGSGSGGGSGGGYGGGSGGGHSGGSGGGHSGGSGGNYGGGSGSGGGSGGGYGGGSGSRGGSGGSHGGGSGFGGESGGSYGGGEEASGSGGGYGGGSGKSSHS')
         
     def test_fasta_get_sequence(self):
         f = parser.FastaIterator(self.handle, index=self.index)
         out = f.get_sequence('c1', 5, 30)
-        digest = hashlib.sha224(out.encode('utf-8')).hexdigest()
-        self.assertEqual( 'ddb5a96ada0f651bffeb8ef856c76faf610ca669a68be904b0acb8b8', digest, "Fasta get_sequence #1 Failure")
+        self.assertEqual('DDDKIVGGYTCAANSIPYQVSLNSGS', out, "Fasta get_sequence #1 Failure")
         f.fasta_file.close()
 
     def test_fasta_index_build(self):
         f = parser.FastaIterator(self.handle)
         f.build_fasta_index()
-        out = '\n'.join([row.decode('utf-8').strip() for row in open(self.index, 'rb')])
-        digest = hashlib.sha224(out.encode('utf-8')).hexdigest()
-        self.assertEqual( 'e071a4ec04e59d55231dc667e06b81b17d96fad0d40fe2ac883e9fe3', digest, "Fasta Index Build Failure")
-        
-        
-suite = unittest.TestLoader().loadTestsFromTestCase(Test_Fasta_Iterator)
-unittest.TextTestRunner(verbosity=2).run(suite)
+        index = open(self.index, 'r').read()
+        self.assertEqual(index, 'c1	231	4	231	232\nc2	623	240	70	71\nc3	645	878	70	71\n')
+
+if __name__ == '__main__':
+    suite = unittest.TestLoader().loadTestsFromTestCase(Test_Fasta_Iterator)
+    unittest.TextTestRunner(verbosity=2).run(suite)

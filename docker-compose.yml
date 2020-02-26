@@ -1,0 +1,10 @@
+version: '2.1'
+
+services:
+  pythomics:
+    image: pythomics:dev
+    build: .
+    volumes:
+      - ./tests:/pythomics/tests
+      - ./scripts:/pythomics/scripts
+      - ./pythomics:/pythomics/pythomics

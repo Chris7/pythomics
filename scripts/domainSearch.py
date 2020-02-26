@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 from __future__ import division, absolute_import
 
 __author__ = 'chris'

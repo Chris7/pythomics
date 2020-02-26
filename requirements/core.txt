@@ -1,0 +1,8 @@
+cython==0.29.14
+lxml==4.4.2
+# Not supported on windows, removed since the only place we use this is in the junction read counting
+# script.
+# pysam==0.15.3
+matplotlib==3.1.2
+scipy==1.4.1
+pandas==0.25.3

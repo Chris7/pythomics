@@ -10,7 +10,7 @@ NITROGEN_NEUTRON = 0.997035
 
 #We use X!Tandem notation for enzymatic digestion:
 #http://thegpm.org/TANDEM/api/pcs.html
-ENZYMES = {'trypsin': '[KR]|{P}', 'lysc': '[K]|[X]', 'none': '|',
+ENZYMES = {'trypsin': '[KR]|{P}', 'lysc': '[K]|[X]', 'none': None,
            'argc': '[R]|[X]', 'gluc': '[E]|[X]', 'aspn': '[X]|[D]',
            'V8': '[ED]|[X]'}
 

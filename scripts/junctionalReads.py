@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 description = """
 This produces a bam file corresponding to junctional regions in a given gtf file

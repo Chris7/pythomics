@@ -1,0 +1,10 @@
+*/.git*
+*.pyc
+.github
+build
+dist
+.coverage
+dist
+.eggs
+.idea
+.tox
