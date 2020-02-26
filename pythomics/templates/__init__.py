@@ -19,7 +19,7 @@ class GenericIterator(six.Iterator):
         self.delimiter = delimiter
         if isinstance(filename, six.string_types) and filename.endswith(".gz"):
             self.gzip = True
-            self.filename = gzip.GzipFile(filename)
+            self.filename = gzip.GzipFile(filename, mode="rb")
         elif isinstance(filename, six.string_types):
             self.filename = open(filename)
         elif (six.PY3 and isinstance(filename, IOBase)) or (
@@ -27,7 +27,7 @@ class GenericIterator(six.Iterator):
         ):
             if filename.name.endswith(".gz"):
                 self.gzip = True
-                self.filename = gzip.GzipFile(filename.name)
+                self.filename = gzip.GzipFile(filename.name, mode="rb")
             else:
                 self.filename = filename
         else:
