@@ -431,7 +431,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
 
         indexList.tail = '\n'
         indent_xml(root)
-        contents = etree.tostring(root, pretty_print=True)
+        contents = etree.tostring(root, pretty_print=True).decode('utf-8')
         scan_offset = contents.find('<spectrumList')+14
         del contents
         scan_indices = []
@@ -453,7 +453,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
             offset = etree.SubElement(spectrumIndex, 'offset', {'idRef': scan_offset_info['idRef']})
             offset.text = scan_offset_info['offset']
         indent_xml(root)
-        contents = etree.tostring(root, pretty_print=True)
+        contents = etree.tostring(root, pretty_print=True).decode('utf-8')
         if indexOffset is not None:
             index_offset = contents.find('<indexListOffset')
             indexOffset.text = str(index_offset)
@@ -462,7 +462,7 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
             m = hashlib.sha1()
             m.update(contents[:contents.find('<fileChecksum')].encode())
             fileChecksum.text = m.hexdigest()
-        handle.write(contents)
+        handle.write(contents.encode('utf-8'))
         self.filename.seek(initial_pos)
 
 
@@ -484,20 +484,20 @@ class MZMLIterator(XMLFileNameMixin, templates.GenericIterator, GenericProteomic
                     if spectra.id == id:
                         return spectra
                 self.filename.seek(int(self.ra[str(id)]))
-                entry = self.filename.readline()
+                entry = self.filename.readline().decode('utf-8')
                 opening_tags = ['<spectrum ', '<chromatogram ']
                 while entry:
                     matching_tags = list(filter(lambda x: x[0] != -1, ((entry.find(i), i) for i in opening_tags)))
                     if any(matching_tags):
                         opening_tag = sorted(matching_tags, key=operator.itemgetter(0))[0][1][1:].strip()
                         break
-                    entry = self.filename.readline()
+                    entry = self.filename.readline().decode('utf-8')
                 if not entry:
                     return None
                 row = [entry]
                 closing_tag = '</{}>'.format(opening_tag)
                 while entry and closing_tag not in entry:
-                    entry = self.filename.readline()
+                    entry = self.filename.readline().decode('utf-8')
                     row.append(entry)
                 if xml:
                     spectra = etree.fromstring(''.join(row))

@@ -15,17 +15,17 @@ class GenericIterator(six.Iterator):
     UNCONSUMED = ''
     contents = []
 
-    def __init__(self, filename, delimiter='\n', mode=None, *args, **kwargs):
+    def __init__(self, filename, delimiter='\n', *args, **kwargs):
         self.delimiter = delimiter
         if isinstance(filename, six.string_types) and filename.endswith('.gz'):
             self.gzip = True
-            self.filename = gzip.GzipFile(filename, mode=mode)
+            self.filename = gzip.GzipFile(filename)
         elif isinstance(filename, six.string_types):
-            self.filename = open(filename, mode=mode)
+            self.filename = open(filename)
         elif (six.PY3 and isinstance(filename, IOBase)) or (six.PY2 and isinstance(filename, file)):
             if filename.name.endswith('.gz'):
                 self.gzip = True
-                self.filename = gzip.GzipFile(filename.name, mode=mode)
+                self.filename = gzip.GzipFile(filename.name)
             else:
                 self.filename = filename
         else:
