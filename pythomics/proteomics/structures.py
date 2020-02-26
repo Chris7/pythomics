@@ -15,9 +15,8 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
-__author__ = 'chris'
-import sys
 from . import config
+
 
 class Chromatogram(object):
     pass
@@ -30,6 +29,7 @@ class ScanObject(object):
     title, charge, mass, scans(list), rt
     rawId: The source of the scan in the raw file (ie the source -- mzML, raw, etc.)
     """
+
     def __init__(self):
         self.scans = []
         self.rt = 0.0
@@ -39,13 +39,13 @@ class ScanObject(object):
 
         self.centroid = False
 
-        #SRM/MRM parameters
+        # SRM/MRM parameters
         self.product_ion = 0
 
     @property
     def rawId(self):
         if self._rawId is None:
-            return getattr(self, 'id', None)
+            return getattr(self, "id", None)
         return self._rawId
 
     @rawId.setter
@@ -53,17 +53,18 @@ class ScanObject(object):
         self._rawId = value
 
     def writeScan(self, o):
-        o.write('BEGIN IONS\n')
-        o.write('TITLE=%s\n'%self.title)
+        o.write("BEGIN IONS\n")
+        o.write("TITLE=%s\n" % self.title)
         try:
-            o.write('RTINSECONDS=%f\n'%self.rt)
+            o.write("RTINSECONDS=%f\n" % self.rt)
         except AttributeError:
             pass
-        o.write('PEPMASS=%s\n'%self.mass)
-        o.write('CHARGE=%s\n'%self.charge)
+        o.write("PEPMASS=%s\n" % self.mass)
+        o.write("CHARGE=%s\n" % self.charge)
         for i in self.scans:
-            o.write('%f\t%f\n'%i)
-        o.write('END IONS\n\n')
+            o.write("%f\t%f\n" % i)
+        o.write("END IONS\n\n")
+
 
 class PeptideObject(ScanObject):
     """
@@ -74,14 +75,15 @@ class PeptideObject(ScanObject):
     keys: labels(like y1+-h20), m/z, intensity, error, series(y,a,b,...), start, end, losses(neutral losses), charge
     for msf files: spectrumId, confidence, rank
     """
+
     def __init__(self):
         super(PeptideObject, self).__init__()
         self.mods = set([])
         self.peptide = ""
         self.hit = 0
-        self.acc = ''# accession information
+        self.acc = ""  # accession information
 
-    def addModification(self, aa,position, modMass, modType):
+    def addModification(self, aa, position, modMass, modType):
         """
         !!!!MODIFICATION POSITION IS 0 BASED!!!!!!
         Modifications are stored internally as a tuple with this format:
@@ -89,13 +91,13 @@ class PeptideObject(ScanObject):
         ie (M, 7, Oxidation, 15.9...)
         such as: M35(o) for an oxidized methionine at residue 35
         """
-        #clean up xtandem
+        # clean up xtandem
         if not modType:
-            #try to figure out what it is
+            # try to figure out what it is
             tmass = abs(modMass)
             smass = str(tmass)
-            prec = len(str(tmass-int(tmass)))-2
-            precFormat = '%'+'0.%df'%prec
+            prec = len(str(tmass - int(tmass))) - 2
+            precFormat = "%" + "0.%df" % prec
             # modType = ""
             # masses = config.MODIFICATION_MASSES
             # for i in masses:
@@ -104,10 +106,10 @@ class PeptideObject(ScanObject):
             #         modType = i
             # if not modType:
             #     sys.stderr.write('mod not found %s\n'%modMass)
-        self.mods.add((aa,str(position),str(modMass),str(modType)))
+        self.mods.add((aa, str(position), str(modMass), str(modType)))
 
     def getModifications(self):
-        return '|'.join([','.join(i) for i in self.mods])
+        return "|".join([",".join(i) for i in self.mods])
 
     @property
     def modifiedPeptide(self):
@@ -117,9 +119,13 @@ class PeptideObject(ScanObject):
             if aa not in config.RESIDUE_MASSES:
                 continue
             pos = int(pos)
-            assert peptide[pos].upper() == aa.upper(), 'Amino acid {} in is not equal to modification amino acid {}'.format(peptide[pos], aa)
+            assert (
+                peptide[pos].upper() == aa.upper()
+            ), "Amino acid {} in is not equal to modification amino acid {}".format(
+                peptide[pos], aa
+            )
             peptide[pos] = aa.lower()
-        return ''.join(peptide)
+        return "".join(peptide)
 
     @property
     def modifiedMass(self):
@@ -129,8 +135,16 @@ class PeptideObject(ScanObject):
         return mass
 
     def getTheorMass(self):
-        aa_info = [config.RESIDUE_MASSES[i.upper()] for i in self.peptide if i in config.RESIDUE_MASSES]
-        peptide_mass = sum([i[0] for i in aa_info])+config.MODIFICATION_MASSES['h'][0]+config.MODIFICATION_MASSES['oh'][0]
+        aa_info = [
+            config.RESIDUE_MASSES[i.upper()]
+            for i in self.peptide
+            if i in config.RESIDUE_MASSES
+        ]
+        peptide_mass = (
+            sum([i[0] for i in aa_info])
+            + config.MODIFICATION_MASSES["h"][0]
+            + config.MODIFICATION_MASSES["oh"][0]
+        )
         modifications = sum([float(i[2]) for i in self.mods])
-        mass = peptide_mass+modifications+float(self.charge)*config.PROTON
-        return mass/float(self.charge)
+        mass = peptide_mass + modifications + float(self.charge) * config.PROTON
+        return mass / float(self.charge)
