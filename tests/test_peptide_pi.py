@@ -11,17 +11,13 @@ class Test_Peptide_Structure(unittest.TestCase):
         )
 
     def test_peptide_mass(self):
-        self.assertEqual(
-            peptide.Peptide("PEPTIDE").getMass(),
-            799.3599989999999,
-            "Peptide Mass test failure.",
+        self.assertAlmostEqual(
+            peptide.Peptide("PEPTIDE").getMass(), 799.359964, places=6
         )
 
     def test_peptide_charge(self):
         self.assertEqual(
-            "%1.6f" % peptide.Peptide("PEPTIDE").getCharge(),
-            "-2.998019",
-            "Peptide Mass test failure.",
+            "%1.6f" % peptide.Peptide("PEPTIDE").getCharge(), "-2.998019",
         )
 
 

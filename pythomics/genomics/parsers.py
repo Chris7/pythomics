@@ -30,7 +30,7 @@ class VCFIterator(templates.GenericIterator, VCFMixin):
         """
         super(VCFIterator, self).__init__(filename)
         # process our meta information
-        row = six.next(self.filename).strip()
+        row = six.next(self.handle).decode().strip()
         self.vcf_file = structure.VCFFile(filename)
         self.inum = 0
         while row[:2] == "##":
@@ -46,15 +46,15 @@ class VCFIterator(templates.GenericIterator, VCFMixin):
                 assert self.vcf_file.add_alt(row)
             elif row.startswith("##"):
                 assert self.vcf_file.add_extra(row)
-            row = six.next(self.filename).strip()
+            row = six.next(self.handle).decode().strip()
         # got to the end of meta information, we now have the header
         assert self.vcf_file.add_header(row)
         self.sample = sample
 
     def get_vcf_entry(self):
-        row = next(self.filename).strip()
+        row = next(self.handle).decode().strip()
         while not row or row.startswith("#"):
-            row = next(self.filename).strip()
+            row = next(self.handle).strip()
         self.inum += 1
         if self.inum % 100000 == 0:
             sys.stderr.write("Processed %d VCF entries\n" % self.inum)
@@ -79,9 +79,9 @@ class GFFIterator(templates.GenericIterator):
         self.quotechar = quotechar
 
     def _next(self):
-        row = six.next(self.filename)
+        row = six.next(self.handle)
         while not row or row[0] == "#":  # skip blanks and comments
-            row = six.next(self.filename)
+            row = six.next(self.handle)
         ob = structure.GFFObject(
             info_delimiter=self.info_delimiter,
             key_delimiter=self.key_delimiter,
@@ -93,9 +93,9 @@ class GFFIterator(templates.GenericIterator):
 
 class BedIterator(templates.GenericIterator):
     def _next(self):
-        row = six.next(self.filename)
+        row = six.next(self.handle)
         while not row:  # skip blanks
-            row = six.next(self.filename)
+            row = six.next(self.handle)
         ob = structure.BedObject()
         ob.parse(row)
         return ob

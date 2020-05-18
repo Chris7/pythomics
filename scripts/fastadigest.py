@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+import sys
+
+import six
+
+import pythomics.proteomics.digest as digest
+import pythomics.parsers.fasta as fasta
+from pythomics.templates import CustomParser
+
 
 description = """
 This script will digest a given fasta file with the specified enzymes. 
@@ -6,15 +14,6 @@ Both protein and nucleotide fasta files are valid inputs, and when
 digesting fasta files, it is possible to create 6 frame as well as 
 3 frame translations.
 """
-
-import sys
-
-import six
-
-from pythomics.templates import CustomParser
-import pythomics.proteomics.digest as digest
-import pythomics.parsers.fasta as fasta
-
 
 parser = CustomParser(description=description)
 parser.add_fasta()
@@ -119,35 +118,25 @@ def main():
                             ]
                         for peptide_index, peptide in enumerate(peptides):
                             if genome:
-                                if len(peptide) >= digest_min:
-                                    if peptide.endswith("*"):
-                                        o.write(
-                                            ">%s F:%s%d Start:%d End:%d \n%s\n"
-                                            % (
-                                                header,
-                                                strand,
-                                                i + 1,
-                                                position,
-                                                position + len(peptide) * 3 - 1,
-                                                peptide[:-1],
-                                            )
+                                stripped_peptide = (
+                                    peptide[:-1] if peptide.endswith("*") else peptide
+                                )
+                                if digest_min <= len(stripped_peptide) <= digest_max:
+                                    o.write(
+                                        ">%s F:%s%d Start:%d End:%d\n%s\n"
+                                        % (
+                                            header,
+                                            strand,
+                                            i + 1,
+                                            position,
+                                            position + len(peptide) * 3 - 1,
+                                            stripped_peptide,
                                         )
-                                    else:
-                                        o.write(
-                                            ">%s F:%s%d Start:%d End:%d \n%s\n"
-                                            % (
-                                                header,
-                                                strand,
-                                                i + 1,
-                                                position,
-                                                position + len(peptide) * 3 - 1,
-                                                peptide,
-                                            )
-                                        )
+                                    )
                                 position += len(peptide) * 3
                             else:
                                 o.write(
-                                    ">%s F:%s%d Orf:%d Pep:%d \n%s\n"
+                                    ">%s F:%s%d Orf:%d Pep:%d\n%s\n"
                                     % (
                                         header,
                                         strand,
@@ -199,35 +188,31 @@ def main():
                                 ]
                             for peptide_index, peptide in enumerate(peptides):
                                 if genome:
-                                    if len(peptide) >= digest_min:
-                                        if peptide.endswith("*"):
-                                            o.write(
-                                                ">%s F:%s%d Start:%d End:%d \n%s\n"
-                                                % (
-                                                    header,
-                                                    strand,
-                                                    i + 1,
-                                                    position - len(peptide) * 3 + 1,
-                                                    position,
-                                                    peptide[:-1],
-                                                )
+                                    stripped_peptide = (
+                                        peptide[:-1]
+                                        if peptide.endswith("*")
+                                        else peptide
+                                    )
+                                    if (
+                                        digest_min
+                                        <= len(stripped_peptide)
+                                        <= digest_max
+                                    ):
+                                        o.write(
+                                            ">%s F:%s%d Start:%d End:%d\n%s\n"
+                                            % (
+                                                header,
+                                                strand,
+                                                i + 1,
+                                                position - len(peptide) * 3 + 1,
+                                                position,
+                                                stripped_peptide,
                                             )
-                                        else:
-                                            o.write(
-                                                ">%s F:%s%d Start:%d End:%d \n%s\n"
-                                                % (
-                                                    header,
-                                                    strand,
-                                                    i + 1,
-                                                    position - len(peptide) * 3 + 1,
-                                                    position,
-                                                    peptide,
-                                                )
-                                            )
+                                        )
                                     position -= len(peptide) * 3
                                 else:
                                     o.write(
-                                        ">%s F:%s%d Orf:%d Pep:%d \n%s\n"
+                                        ">%s F:%s%d Orf:%d Pep:%d\n%s\n"
                                         % (
                                             header,
                                             strand,
@@ -252,7 +237,7 @@ def main():
                         for sub_seq in enzyme.cleave(peptide_sequence, **enzyme_kwargs)
                     ]
                 for peptide_index, peptide in enumerate(peptides):
-                    o.write(">%s Pep:%d \n%s\n" % (header, peptide_index + 1, peptide))
+                    o.write(">%s Pep:%d\n%s\n" % (header, peptide_index + 1, peptide))
 
 
 if __name__ == "__main__":

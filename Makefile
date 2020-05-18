@@ -3,5 +3,5 @@ testenv:
 	pip install -e .
 
 test:
-	nosetests --with-coverage --cover-erase --cover-package=pythomics -s tests
+	py.test --cov=pythomics --cov-report=xml -s tests
 
