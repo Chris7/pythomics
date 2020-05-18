@@ -8,6 +8,7 @@ import unittest
 def fix_eol(string):
     if platform.system() == "Windows":
         return string.replace("\r\n", "\n")
+    return string
 
 
 class Test_Script_Fasta_Digest(unittest.TestCase):
