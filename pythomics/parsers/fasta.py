@@ -90,7 +90,7 @@ class FastaIterator(templates.GenericIterator):
 
         self.sequence_index = {}
         _seq_dict = self.sequence_index
-        for row in open(index, "rb"):
+        for row in open(self.fasta_index, "rb"):
             entry = row.decode("utf-8").strip().split("\t")
             # Fasta index spec: http://www.htslib.org/doc/faidx.html#DESCRIPTION
             _seq_dict[entry[0]] = tuple(entry[1:])
@@ -200,10 +200,13 @@ class FastaIterator(templates.GenericIterator):
                 )
             )
 
+        return out
+
     def build_fasta_index(self):
         try:
             subprocess.check_output(["samtools", "-v"])
         except OSError:
-            self._build_index()
+            self.fasta_index = self._build_index()
         else:
             subprocess.check_output(["samtools", "faidx", self.filename])
+            self.fasta_index = "{}.fai".format(self.filename)
