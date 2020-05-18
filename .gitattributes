@@ -1,1 +1,5 @@
-*  text eol=lf
+*.py  text eol=lf
+*.fasta  text eol=lf
+*.gff3  text eol=lf
+*.gtf  text eol=lf
+*.vcf  text eol=lf
