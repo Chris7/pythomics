@@ -18,22 +18,27 @@ class GenericIterator(six.Iterator):
     def __init__(self, filename, delimiter="\n", *args, **kwargs):
         self.delimiter = delimiter
         self.filename = filename
-        if isinstance(filename, six.string_types) and filename.endswith(".gz"):
-            self.gzip = True
-            self.handle = gzip.GzipFile(filename, mode="rb")
-        elif isinstance(filename, six.string_types):
-            self.handle = open(filename, "rb")
-        elif (six.PY3 and isinstance(filename, IOBase)) or (
+        if (six.PY3 and isinstance(filename, IOBase)) or (
             six.PY2 and isinstance(filename, file)
         ):
             self.filename = filename.name
-            if filename.name.endswith(".gz"):
+            self._handle = filename
+
+    @property
+    def handle(self):
+        handle = getattr(self, "_handle", None)
+
+        if not handle:
+            filename = self.filename
+            if isinstance(filename, six.string_types) and filename.endswith(".gz"):
                 self.gzip = True
-                self.handle = gzip.GzipFile(filename.name, mode="rb")
-            else:
-                self.handle = filename
-        else:
-            raise TypeError
+                handle = gzip.GzipFile(filename, mode="rb")
+            elif isinstance(filename, six.string_types):
+                handle = open(filename, "rb")
+
+            self._handle = handle
+
+        return handle
 
     def __iter__(self):
         return self
@@ -42,7 +47,7 @@ class GenericIterator(six.Iterator):
         if self.gzip:
             if self.contents:
                 return self.contents.popleft()
-            new_contents = self.filename.read(self.CHUNK_SIZE)
+            new_contents = self.handle.read(self.CHUNK_SIZE)
             if not new_contents:
                 if self.UNCONSUMED:
                     return self.UNCONSUMED
@@ -61,7 +66,7 @@ class GenericIterator(six.Iterator):
             if self.contents:
                 return self.contents.popleft()
         else:
-            return six.next(self.filename).strip()
+            return six.next(self.handle).strip()
 
     def __next__(self):
         return self._next()
