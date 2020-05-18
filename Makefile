@@ -3,5 +3,5 @@ testenv:
 	pip install -e .
 
 test:
-	py.test --cov=pythomics -s tests
+	py.test --cov=pythomics --cov-report=xml -s tests
 
