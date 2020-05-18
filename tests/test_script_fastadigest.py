@@ -1,7 +1,13 @@
 import os
+import platform
 import subprocess
 import sys
 import unittest
+
+
+def fix_eol(string):
+    if platform.system() == "Windows":
+        return string.replace("\r\n", "\n")
 
 
 class Test_Script_Fasta_Digest(unittest.TestCase):
@@ -32,8 +38,8 @@ class Test_Script_Fasta_Digest(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        res = job.stdout.read().decode()
-        assert ">chr17_gl000203_random F:+1 Start:46 End:57\nIFF\n" in res
+        res = fix_eol(job.stdout.read().decode())
+        assert ">chr17_gl000203_random F:+1 Start:46 End:57\nIFF" in res
         assert ">chr1 F:+3 Start:10416 End:10421\nP\n" in res
         assert (
             ">chr17_gl000203_random F:-1 Start:23 End:100\nGLPYSAGWRVWYNLIRKKFKYLSKS\n"
@@ -59,7 +65,7 @@ class Test_Script_Fasta_Digest(unittest.TestCase):
             ],
             stdout=subprocess.PIPE,
         )
-        res = job.stdout.read().decode()
+        res = fix_eol(job.stdout.read().decode())
         assert ">chr17_gl000203_random F:-3 Start:879 End:902\nNVNHIIDK\n" in res
         assert ">chr17_gl000203_random F:+3 Start:3834 End:3839\nIK\n" in res
         # Assert we have non K/R endings if its a stop codon (the nucleotide sequence goes to the end of the stop codon
@@ -91,7 +97,7 @@ class Test_Script_Fasta_Digest(unittest.TestCase):
             ],
             stdout=subprocess.PIPE,
         )
-        res = job.stdout.read().decode().split("\n")
+        res = fix_eol(job.stdout.read().decode()).split("\n")
         # ensure the length boundaries are respected
         for sequence in res[1::2]:
             assert 6 <= len(sequence) <= 30
@@ -112,7 +118,7 @@ class Test_Script_Fasta_Digest(unittest.TestCase):
             ],
             stdout=subprocess.PIPE,
         )
-        res = job.stdout.read().decode()
+        res = fix_eol(job.stdout.read().decode())
         assert ">c3 Pep:48\nDAR\n" in res
 
     def test_fasta_protein_digest_trypsin(self):
@@ -151,7 +157,7 @@ class Test_Script_Fasta_Digest(unittest.TestCase):
             ],
             stdout=subprocess.PIPE,
         )
-        res = job.stdout.read().decode().split("\n")
+        res = fix_eol(job.stdout.read().decode()).split("\n")
         for sequence in res[1::2]:
             assert 6 <= len(sequence) <= 30
 
