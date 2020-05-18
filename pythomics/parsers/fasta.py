@@ -77,7 +77,7 @@ class FastaIterator(templates.GenericIterator):
 
     def open_fasta_index(self):
         index = self.fasta_index
-        if not os.path.exists(index):
+        if index is None or not os.path.exists(index):
             sys.stderr.write("index not found, creating it\n")
             try:
                 self.build_fasta_index()
