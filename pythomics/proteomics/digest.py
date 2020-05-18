@@ -49,9 +49,9 @@ class Enzyme(object):
             if unique:
                 peptides += list(
                     collections.OrderedDict.fromkeys(
-                        [i for i in digests if len(i) >= min and len(i) <= max]
+                        [i for i in digests if min <= len(i) <= max]
                     )
                 )
             else:
-                peptides += [i for i in digests if len(i) >= min and len(i) <= max]
+                peptides += [i for i in digests if min <= len(i) <= max]
         return peptides
