@@ -138,7 +138,7 @@ class Test_Script_Fasta_Digest(unittest.TestCase):
             ],
             stdout=subprocess.PIPE,
         )
-        res = job.stdout.read().decode()
+        res = fix_eol(job.stdout.read().decode())
         # Assert we find semi-tryptic products
         assert ">c1 Pep:11\nNKPGVYTK\n" in res
 
