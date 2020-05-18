@@ -115,12 +115,12 @@ class XMLFileNameMixin(object):
     def __init__(self, *args, **kwargs):
         super(XMLFileNameMixin, self).__init__(*args, **kwargs)
         if self.gzip:
-            file_info = etree.parse(self.filename.name).iter(
+            file_info = etree.parse(self.filename).iter(
                 tag=("{http://psi.hupo.org/ms/mzml}sourceFile",)
             )
         else:
             file_info = etree.iterparse(
-                self.filename.name, tag=("{http://psi.hupo.org/ms/mzml}sourceFile",)
+                self.filename, tag=("{http://psi.hupo.org/ms/mzml}sourceFile",)
             )
         self.filetype = None
         identifiers = [
@@ -174,7 +174,7 @@ class XMLFileNameMixin(object):
 class GuessIterator(templates.GenericIterator):
     def __init__(self, *args, **kwargs):
         super(GuessIterator, self).__init__(*args, **kwargs)
-        filename = self.filename.name.lower()
+        filename = self.filename.lower()
         if filename.endswith(".mzml"):
             self.parser = MZMLIterator
         elif filename.endswith(".pepxml") or filename.endswith(".pep.xml"):
@@ -217,11 +217,11 @@ class MZMLIterator(
         self.full = full
         self.ms_filter = ms_filter
         self.start = start
-        self.filename.seek(0)
+        self.handle.seek(0)
         self.spectra = (
-            cetree.parse(self.filename).iter()
+            cetree.parse(self.handle).iter()
             if self.gzip
-            else cetree.iterparse(self.filename)
+            else cetree.iterparse(self.handle)
         )
         self.ra = {}
         duplicate_values = set([])
@@ -243,13 +243,13 @@ class MZMLIterator(
                 print(
                     "mzML index is missing. Please provide files with an index. Building index in memory."
                 )
-            self.ra = self.build_index(self.filename)
+            self.ra = self.build_index(self.handle)
         del self.spectra
-        self.filename.seek(0)
+        self.handle.seek(0)
         self.spectra = (
-            cetree.parse(self.filename).iter()
+            cetree.parse(self.handle).iter()
             if self.gzip
-            else cetree.iterparse(self.filename)
+            else cetree.iterparse(self.handle)
         )
         self.scans = {}
         self.startIter = True
@@ -572,12 +572,12 @@ class MZMLIterator(
         if not hasattr(scans, "__iter__"):
             scans = [scans]
 
-        initial_pos = self.filename.tell()
-        self.filename.seek(0)
+        initial_pos = self.handle.tell()
+        self.handle.seek(0)
         xml_iter = (
-            etree.parse(self.filename, events=("start",)).iter()
+            etree.parse(self.handle, events=("start",)).iter()
             if self.gzip
-            else etree.iterparse(self.filename, events=("start",))
+            else etree.iterparse(self.handle, events=("start",))
         )
 
         # this is the indexedmzML header
@@ -624,7 +624,7 @@ class MZMLIterator(
         scan_indices = []
 
         # add our scans to the xml object
-        offset = self.filename.tell()
+        offset = self.handle.tell()
         for scan_index, scan_id in enumerate(scans):
             scan = self.getScan(str(scan_id), xml=True)
             scan_indices.append({"offset": str(scan_offset), "idRef": scan.get("id")})
@@ -633,7 +633,7 @@ class MZMLIterator(
             scan.tail = "\n"
             spectrumList.append(scan)
 
-        self.filename.seek(offset)
+        self.handle.seek(offset)
         spectrumIndex = etree.SubElement(indexList, "index", {"name": "spectrum"})
         spectrumIndex.tail = "\n"
         for scan_index, scan_offset_info in enumerate(scan_indices):
@@ -653,7 +653,7 @@ class MZMLIterator(
             m.update(contents[: contents.find("<fileChecksum")].encode())
             fileChecksum.text = m.hexdigest()
         handle.write(contents.encode("utf-8"))
-        self.filename.seek(initial_pos)
+        self.handle.seek(initial_pos)
 
     def getScan(self, id, peptide=None, xml=False):
         try:
@@ -672,8 +672,8 @@ class MZMLIterator(
                     spectra = six.next(self)
                     if spectra.id == id:
                         return spectra
-                self.filename.seek(int(self.ra[str(id)]))
-                entry = maybe_decode(self.filename.readline())
+                self.handle.seek(int(self.ra[str(id)]))
+                entry = maybe_decode(self.handle.readline())
                 opening_tags = ["<spectrum ", "<chromatogram "]
                 while entry:
                     matching_tags = list(
@@ -687,13 +687,13 @@ class MZMLIterator(
                             0
                         ][1][1:].strip()
                         break
-                    entry = maybe_decode(self.filename.readline())
+                    entry = maybe_decode(self.handle.readline())
                 if not entry:
                     return None
                 row = [entry]
                 closing_tag = "</{}>".format(opening_tag)
                 while entry and closing_tag not in entry:
-                    entry = maybe_decode(self.filename.readline())
+                    entry = maybe_decode(self.handle.readline())
                     row.append(entry)
                 if xml:
                     spectra = etree.fromstring("".join(row))
@@ -721,7 +721,7 @@ class PepXMLIterator(
             # find our mzml first
             mzml = six.next(
                 etree.iterparse(
-                    self.filename.name,
+                    self.filename,
                     tag=(
                         "{http://regis-web.systemsbiology.net/pepXML}msms_run_summary",
                     ),
@@ -746,9 +746,9 @@ class PepXMLIterator(
                         )
                     except IOError:
                         self.mzml = None
-            self.filename.seek(0)
+            self.handle.seek(0)
             dom1 = etree.iterparse(
-                self.filename.name,
+                self.filename,
                 tag=("{http://regis-web.systemsbiology.net/pepXML}spectrum_query",),
             )
             self.lxml = True
@@ -917,7 +917,7 @@ class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
         self.store = kwargs.get("store", False)
         try:
             # find our peptides and process them first
-            peps = etree.iterparse(self.filename.name, tag=("PeptideItem",))
+            peps = etree.iterparse(self.filename, tag=("PeptideItem",))
             for tag, peptideXML in peps:
                 pepObj = PeptideObject()
                 peptide = peptideXML.find("Sequence").text
@@ -956,8 +956,8 @@ class mzDataIterator(templates.GenericIterator, GenericProteomicIterator):
                     mod_name = userParams.get("Name")
                     pepObj.addModification(mod_aa, position, mod_name, mass)
                 self.peptides[spectrum] = pepObj
-            self.filename.seek(0)
-            dom1 = etree.iterparse(self.filename.name, tag=("spectrum",))
+            self.handle.seek(0)
+            dom1 = etree.iterparse(self.filename, tag=("spectrum",))
             self.lxml = True
         except NameError:
             self.lxml = False
@@ -1042,14 +1042,14 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
         # parse modifications
         specs = [
             i[1]
-            for i in etree.iterparse(self.filename.name, tag="group")
+            for i in etree.iterparse(self.filename, tag="group")
             if i[1].attrib.get("label") == "input parameters"
         ][0]
         # X!tandem will have definitions including carboxy methyl,etc. so we just search for K/R until there is a better solution
         # to definitively identify SILAC label schemes
         self.silac_labels = {"Light": {}}
         silac_parse = r"(?:(?P<mass>[0-9\.]+)\@(?P<residue>[KR]))"
-        self.file_path = self.filename.name
+        self.file_path = self.filename
         self.rt_parse = re.compile(r"PT([0-9\.]+)S")
         for i in specs.iter(tag="note"):
             label = i.attrib.get("label")
@@ -1076,7 +1076,7 @@ class XTandemXMLIterator(templates.GenericIterator, GenericProteomicIterator):
                 self.file_path = i.text
         try:
             # we cannot use iterparse here because for some reason we randomly get screwed up on X!tandems namespaces with lxml
-            self.group = etree.parse(self.filename.name).iterfind("group")
+            self.group = etree.parse(self.filename).iterfind("group")
         except NameError:
             sys.stderr.write(
                 "XTandem parsing unavailable: lxml is required to parse X!tandem xml files due to the namespaces employed\n"
@@ -1217,7 +1217,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
     def __init__(self, filename, **kwrds):
         super(MGFIterator, self).__init__(filename, **kwrds)
         # load our index
-        indexFile = "".join(os.path.splitext(self.filename.name)[0]) + ".mgfi"
+        indexFile = "".join(os.path.splitext(self.filename)[0]) + ".mgfi"
         self.scanSplit = re.compile(r"[\s\t]")
         self.rand = True
         self.titleMap = {}
@@ -1249,16 +1249,16 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                     break
             for i in self.ra:
                 f.write("%s\t%d\t%d\n" % (i, self.ra[i][0], self.ra[i][1]))
-            self.filename.seek(0)
+            self.handle.seek(0)
 
     def getScan(self, title, peptide=None):
         """
         allows random lookup
         """
         if title in self.ra:
-            self.filename.seek(self.ra[title][0], 0)
+            self.handle.seek(self.ra[title][0], 0)
             toRead = self.ra[title][1] - self.ra[title][0]
-            info = self.filename.read(toRead)
+            info = self.handle.read(toRead)
             scan = self.parseScan(info)
         else:
             return None
@@ -1304,7 +1304,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
         return None
 
     def _next(self):
-        row = self.filename.readline()
+        row = self.handle.readline()
         if row == "":
             raise StopIteration
         setupScan = False
@@ -1318,7 +1318,7 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                 pass
             elif "BEGIN IONS" in row:
                 if self.rand:
-                    pStart = self.filename.tell()
+                    pStart = self.handle.tell()
                 setupScan = True
             #                newScan=True
             elif "END IONS" in row:
@@ -1330,11 +1330,11 @@ class MGFIterator(templates.GenericIterator, GenericProteomicIterator):
                 return None
             elif setupScan:
                 scanInfo += row
-            pos = self.filename.tell()
-            row = self.filename.readline()
+            pos = self.handle.tell()
+            row = self.handle.readline()
 
     def getProgress(self):
-        return self.filename.tell() * 100 / self.epos
+        return self.handle.tell() * 100 / self.epos
 
 
 class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
@@ -1342,7 +1342,7 @@ class MascotDATIterator(templates.GenericIterator, GenericProteomicIterator):
         super(MascotDATIterator, self).__init__(filename)
         self.specParse = re.compile(r"Spectrum(\d+)")
         self.afterSlash = re.compile(r".+[\\/](.+)$")
-        self.f = self.filename.name
+        self.f = self.filename
         resfile = msparser.ms_mascotresfile(self.f)
         self.hit = 0
         results = msparser.ms_peptidesummary(

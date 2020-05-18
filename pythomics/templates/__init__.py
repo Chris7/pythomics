@@ -17,19 +17,21 @@ class GenericIterator(six.Iterator):
 
     def __init__(self, filename, delimiter="\n", *args, **kwargs):
         self.delimiter = delimiter
+        self.filename = filename
         if isinstance(filename, six.string_types) and filename.endswith(".gz"):
             self.gzip = True
-            self.filename = gzip.GzipFile(filename, mode="rb")
+            self.handle = gzip.GzipFile(filename, mode="rb")
         elif isinstance(filename, six.string_types):
-            self.filename = open(filename)
+            self.handle = open(filename, "rb")
         elif (six.PY3 and isinstance(filename, IOBase)) or (
             six.PY2 and isinstance(filename, file)
         ):
+            self.filename = filename.name
             if filename.name.endswith(".gz"):
                 self.gzip = True
-                self.filename = gzip.GzipFile(filename.name, mode="rb")
+                self.handle = gzip.GzipFile(filename.name, mode="rb")
             else:
-                self.filename = filename
+                self.handle = filename
         else:
             raise TypeError
 
@@ -127,7 +129,7 @@ class CustomParser(argparse.ArgumentParser):
             "--fasta",
             nargs="?",
             help=help,
-            type=argparse.FileType("r"),
+            type=argparse.FileType("rb"),
             required=True,
         )
 

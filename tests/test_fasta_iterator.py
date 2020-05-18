@@ -1,4 +1,5 @@
-import os, sys, unittest
+import os
+import unittest
 
 import pythomics.parsers.fasta as parser
 
@@ -30,7 +31,7 @@ class Test_Fasta_Iterator(unittest.TestCase):
         self.assertEqual(
             "DDDKIVGGYTCAANSIPYQVSLNSGS", out, "Fasta get_sequence #1 Failure"
         )
-        f.fasta_file.close()
+        f.handle.close()
 
     def test_fasta_index_build(self):
         f = parser.FastaIterator(self.handle)

@@ -8,7 +8,7 @@ setup(
     author="Chris Mitchell",
     author_email="chris.mit7@gmail.com",
     install_requires=["lxml", "six",],
-    extras_require={"all": ["matplotlib", "pandas", "pysam", "scipy",],},
+    extras_require={"all": ["matplotlib", "pandas", "pysam", "scipy", "pyfaidx"],},
     license="GPL3",
     packages=find_packages(),
     scripts=[
