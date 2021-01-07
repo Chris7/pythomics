@@ -1,5 +1,5 @@
 cython==0.29.14
-lxml==4.4.2
+lxml==4.6.2
 # Not supported on windows, removed since the only place we use this is in the junction read counting
 # script.
 # pysam==0.15.3
