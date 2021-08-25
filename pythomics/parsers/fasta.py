@@ -204,9 +204,8 @@ class FastaIterator(templates.GenericIterator):
 
     def build_fasta_index(self):
         try:
-            subprocess.check_output(["samtools", "-v"])
+            subprocess.check_output(["samtools", "faidx", self.filename])
         except OSError:
             self.fasta_index = self._build_index()
         else:
-            subprocess.check_output(["samtools", "faidx", self.filename])
             self.fasta_index = "{}.fai".format(self.filename)
