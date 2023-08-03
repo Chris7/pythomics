@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="pythomics",
-    version="0.4.0",
+    version="0.4.1",
     description="A multi-omic python package",
     url="https://github.com/chris7/pythomics",
     author="Chris Mitchell",
