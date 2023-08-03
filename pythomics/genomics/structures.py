@@ -15,13 +15,13 @@ GENOTYPE_SPLIT = re.compile(r"[\|/]")
 class VCFFile(object):
     def __init__(self, filename):
         """VCF File container
-        
+
         This class is designed to be somewhat consistent with the C++
         implementation of vcftools. It contains our higher level
         information such as metadata, samples, the format field,
         and can contain entries as well. Thus it can serve as a
         simple iterator or an in-memory VCF instance for rapid queries.
-        
+
         """
         self.filename = filename
         self.meta = VCFMeta()
@@ -81,9 +81,7 @@ class VCFFile(object):
         return var_call
 
     def get_header(self, individual=-1):
-        """Returns the vcf header
-
-        """
+        """Returns the vcf header"""
         type_map = dict([(val, key) for key, val in self.meta.type_map.iteritems()])
         extra = "\n".join(["##{0}".format(i) for i in self.meta.extra])
         info = "\n".join(
@@ -140,8 +138,7 @@ class VCFFile(object):
         return "\n".join([extra, info, filter, format, alt, header])
 
     def get_individual(self, individual=None):
-        """Returns the index of the individual
-        """
+        """Returns the index of the individual"""
 
         return self.individuals.get(individual, None)
 
@@ -149,10 +146,10 @@ class VCFFile(object):
 class VCFMeta(object):
     def __init__(self):
         """VCF Metainfo Container
-        
+
         This contains information in the metainfo of a VCF File
         such as the format fields, ids, and filters.
-    
+
         """
         self.info = OrderedDict()
         self.filter = OrderedDict()
@@ -301,9 +298,7 @@ class VCFEntry(object):
         return "\t".join([base, "\t".join(extra)])
 
     def get_sample_info(self, individual=-1):
-        """Returns the sample info of a given sample or all by default
-
-        """
+        """Returns the sample info of a given sample or all by default"""
         if isinstance(individual, str):
             individual = self.individuals[individual]
         extra = OrderedDict()
@@ -627,9 +622,7 @@ class GFFFeature(object):
         return {} if not hasattr(self, "children") else self.children
 
     def parts(self):
-        """A generator consisting GFFObjects within this feature
-
-        """
+        """A generator consisting GFFObjects within this feature"""
         for i in self.features:
             yield i
 

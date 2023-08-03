@@ -11,16 +11,14 @@ from ..proteomics import config as protein_config
 
 class GenericIterator(six.Iterator):
     gzip = False
-    CHUNK_SIZE = 2 ** 16
+    CHUNK_SIZE = 2**16
     UNCONSUMED = ""
     contents = []
 
     def __init__(self, filename, delimiter="\n", *args, **kwargs):
         self.delimiter = delimiter
         self.filename = filename
-        if (six.PY3 and isinstance(filename, IOBase)) or (
-            six.PY2 and isinstance(filename, file)
-        ):
+        if isinstance(filename, IOBase):
             self.filename = filename.name
             self._handle = filename
 

@@ -273,7 +273,7 @@ class MZMLIterator(
         character_count = 0
         UNCONSUMED = ""
         while True:
-            i = UNCONSUMED + file_obj.read(2 ** 16)
+            i = UNCONSUMED + file_obj.read(2**16)
             UNCONSUMED = ""
             if i == "":
                 break

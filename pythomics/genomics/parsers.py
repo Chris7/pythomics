@@ -23,10 +23,10 @@ class VCFMixin(object):
 class VCFIterator(templates.GenericIterator, VCFMixin):
     def __init__(self, filename, sample=None):
         """An iterator over the VCF file format
-        
+
         This reads VCF files and has been tested on VCF 4.0.
         The returned items are VCFEntry
-        
+
         """
         super(VCFIterator, self).__init__(filename)
         # process our meta information

@@ -17,7 +17,8 @@ class Test_Peptide_Structure(unittest.TestCase):
 
     def test_peptide_charge(self):
         self.assertEqual(
-            "%1.6f" % peptide.Peptide("PEPTIDE").getCharge(), "-2.998019",
+            "%1.6f" % peptide.Peptide("PEPTIDE").getCharge(),
+            "-2.998019",
         )
 
 

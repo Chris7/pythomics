@@ -51,6 +51,7 @@ quality_offset = 64
 paired = False
 read_min = 25
 
+
 # @profile
 def trim_read(entries):
     result = []
